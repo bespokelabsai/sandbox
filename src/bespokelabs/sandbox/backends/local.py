@@ -2,80 +2,22 @@ from __future__ import annotations
 
 import os
 import pathlib
-import re
 import shutil
 import subprocess
 import tempfile
 
+from bespokelabs.sandbox.backends._prelude import (
+    PYTHON_PREAMBLE,
+    SHELL_PRELUDE,
+    is_python_language,
+    rewrite_redirects,
+)
 from bespokelabs.sandbox.exceptions import (
     FeatureNotSupportedError,
     SandboxCreationError,
     SandboxExecutionError,
 )
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
-
-# Shell prelude injected into bash -c commands.  Defines wrapper functions
-# for common file utilities so that absolute-path arguments are rewritten
-# to $SANDBOX_ROOT/... before the real binary runs.
-_SHELL_PRELUDE = r"""
-__sb_run() {
-    local cmd="$1"; shift
-    local args=()
-    for arg in "$@"; do
-        if [[ "$arg" == /* ]]; then
-            args+=("${SANDBOX_ROOT}${arg}")
-        else
-            args+=("$arg")
-        fi
-    done
-    command "$cmd" "${args[@]}"
-}
-for __c in cat ls cp mv head tail wc grep find rm mkdir touch chmod stat file; do
-    eval "$__c() { __sb_run $__c \"\$@\"; }"
-done
-"""
-
-# Python preamble injected into execute_code() invocations.  Monkey-patches
-# builtins.open, io.open, and common os functions so that absolute paths
-# resolve under $SANDBOX_ROOT instead of the host root.  Paths that already
-# point inside the sandbox (or to /dev, /proc, /sys) are left alone to
-# prevent double-rebasing and to keep special files working.
-_PYTHON_PREAMBLE = """\
-def _sb_setup():
-    import builtins, io, os
-    root = os.environ.get("SANDBOX_ROOT", "")
-    if not root:
-        return
-    pfx = root + "/"
-    def rp(p):
-        if isinstance(p, str) and p.startswith("/") and not (
-            p.startswith((pfx, "/dev/", "/proc/", "/sys/")) or p == root
-        ):
-            return root + p
-        if hasattr(p, "__fspath__"):
-            s = os.fspath(p)
-            if isinstance(s, str) and s.startswith("/") and not (
-                s.startswith((pfx, "/dev/", "/proc/", "/sys/")) or s == root
-            ):
-                import pathlib
-                return pathlib.Path(root + s)
-        return p
-    _orig = builtins.open
-    def _open(f, *a, **k):
-        return _orig(rp(f), *a, **k)
-    builtins.open = io.open = _open
-    for _n in ("stat", "lstat", "listdir", "scandir", "mkdir", "makedirs",
-               "remove", "unlink", "rmdir", "open", "chmod"):
-        _f = getattr(os, _n, None)
-        if _f:
-            def _w(_o=_f):
-                def _fn(p, *a, **k):
-                    return _o(rp(p), *a, **k)
-                return _fn
-            setattr(os, _n, _w())
-_sb_setup()
-del _sb_setup
-"""
 
 
 class LocalAdapter:
@@ -110,8 +52,10 @@ class LocalAdapter:
 
     def execute_code(self, code: str, language: str = "python") -> SandboxResult:
         resolved = self._resolve_interpreter(language)
-        if language.startswith("python"):
-            code = _PYTHON_PREAMBLE + code
+        if is_python_language(language):
+            code = PYTHON_PREAMBLE + (
+                "exec(compile(%r, \"<sandbox>\", \"exec\"), globals())\n" % code
+            )
         try:
             result = subprocess.run(
                 [resolved, "-c", code],
@@ -142,8 +86,8 @@ class LocalAdapter:
                         and len(args) >= 2 and args[0] == "-c"):
                     # Nested shell: route through the prelude so that both
                     # command arguments and redirections are rebased.
-                    shell_cmd = self._rewrite_redirects(args[1])
-                    cmd = ["bash", "-c", _SHELL_PRELUDE + shell_cmd] + [
+                    shell_cmd = rewrite_redirects(args[1])
+                    cmd = ["bash", "-c", SHELL_PRELUDE + shell_cmd] + [
                         self._resolve_path(a) if os.path.isabs(a) else a
                         for a in args[2:]
                     ]
@@ -153,7 +97,7 @@ class LocalAdapter:
                         for a in args
                     ]
             else:
-                cmd = ["bash", "-c", self._wrap_command(command)]
+                cmd = ["bash", "-c", SHELL_PRELUDE + rewrite_redirects(command)]
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -274,14 +218,3 @@ class LocalAdapter:
         """Convert a host filesystem path back to a sandbox-relative path."""
         rel = host_path.relative_to(self._workdir)
         return f"/{rel}"
-
-    @staticmethod
-    def _rewrite_redirects(command: str) -> str:
-        """Rewrite absolute paths in shell redirections (>, >>, <)."""
-        command = re.sub(r'(>[>]?\s*)(/[^\s])', r'\1${SANDBOX_ROOT}\2', command)
-        command = re.sub(r'(<\s*)(/[^\s])', r'\1${SANDBOX_ROOT}\2', command)
-        return command
-
-    def _wrap_command(self, command: str) -> str:
-        """Wrap a shell command so absolute paths resolve under the sandbox root."""
-        return _SHELL_PRELUDE + self._rewrite_redirects(command)

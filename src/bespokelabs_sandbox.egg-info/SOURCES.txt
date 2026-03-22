@@ -1,3 +1,4 @@
+LICENSE
 README.md
 pyproject.toml
 src/bespokelabs/__init__.py
@@ -9,11 +10,15 @@ src/bespokelabs/sandbox/sandbox.py
 src/bespokelabs/sandbox/types.py
 src/bespokelabs/sandbox/backends/__init__.py
 src/bespokelabs/sandbox/backends/daytona.py
+src/bespokelabs/sandbox/backends/docker.py
 src/bespokelabs/sandbox/backends/e2b.py
+src/bespokelabs/sandbox/backends/local.py
 src/bespokelabs/sandbox/backends/modal.py
+src/bespokelabs/sandbox/backends/ray.py
 src/bespokelabs/sandbox/backends/tensorlake.py
 src/bespokelabs_sandbox.egg-info/PKG-INFO
 src/bespokelabs_sandbox.egg-info/SOURCES.txt
 src/bespokelabs_sandbox.egg-info/dependency_links.txt
 src/bespokelabs_sandbox.egg-info/requires.txt
 src/bespokelabs_sandbox.egg-info/top_level.txt
+tests/test_local_ray_backends.py

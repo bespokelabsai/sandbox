@@ -4,6 +4,8 @@ daytona>=0.1.0
 tensorlake>=0.1.0
 modal>=0.60.0
 e2b-code-interpreter>=1.0.0
+docker>=7.0.0
+ray>=2.0.0
 
 [daytona]
 daytona>=0.1.0
@@ -12,11 +14,17 @@ daytona>=0.1.0
 pytest>=8.0
 ruff>=0.8.0
 
+[docker]
+docker>=7.0.0
+
 [e2b]
 e2b-code-interpreter>=1.0.0
 
 [modal]
 modal>=0.60.0
+
+[ray]
+ray>=2.0.0
 
 [tensorlake]
 tensorlake>=0.1.0

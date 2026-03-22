@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import os
 import pathlib
-import re
 import shutil
 import subprocess
 import tempfile
 
+from bespokelabs.sandbox.backends._prelude import (
+    PYTHON_PREAMBLE,
+    SHELL_PRELUDE,
+    is_python_language,
+    rewrite_redirects,
+)
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     FeatureNotSupportedError,
@@ -14,64 +19,6 @@ from bespokelabs.sandbox.exceptions import (
     SandboxExecutionError,
 )
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
-
-# Shared constants — identical to the ones in local.py.  Kept in each
-# backend file so that each module is self-contained.
-
-_SHELL_PRELUDE = r"""
-__sb_run() {
-    local cmd="$1"; shift
-    local args=()
-    for arg in "$@"; do
-        if [[ "$arg" == /* ]]; then
-            args+=("${SANDBOX_ROOT}${arg}")
-        else
-            args+=("$arg")
-        fi
-    done
-    command "$cmd" "${args[@]}"
-}
-for __c in cat ls cp mv head tail wc grep find rm mkdir touch chmod stat file; do
-    eval "$__c() { __sb_run $__c \"\$@\"; }"
-done
-"""
-
-_PYTHON_PREAMBLE = """\
-def _sb_setup():
-    import builtins, io, os
-    root = os.environ.get("SANDBOX_ROOT", "")
-    if not root:
-        return
-    pfx = root + "/"
-    def rp(p):
-        if isinstance(p, str) and p.startswith("/") and not (
-            p.startswith((pfx, "/dev/", "/proc/", "/sys/")) or p == root
-        ):
-            return root + p
-        if hasattr(p, "__fspath__"):
-            s = os.fspath(p)
-            if isinstance(s, str) and s.startswith("/") and not (
-                s.startswith((pfx, "/dev/", "/proc/", "/sys/")) or s == root
-            ):
-                import pathlib
-                return pathlib.Path(root + s)
-        return p
-    _orig = builtins.open
-    def _open(f, *a, **k):
-        return _orig(rp(f), *a, **k)
-    builtins.open = io.open = _open
-    for _n in ("stat", "lstat", "listdir", "scandir", "mkdir", "makedirs",
-               "remove", "unlink", "rmdir", "open", "chmod"):
-        _f = getattr(os, _n, None)
-        if _f:
-            def _w(_o=_f):
-                def _fn(p, *a, **k):
-                    return _o(rp(p), *a, **k)
-                return _fn
-            setattr(os, _n, _w())
-_sb_setup()
-del _sb_setup
-"""
 
 
 class RayAdapter:
@@ -120,8 +67,10 @@ class RayAdapter:
 
                 def execute_code(self, code: str, language: str) -> dict:
                     resolved = self._resolve_interpreter(language)
-                    if language.startswith("python"):
-                        code = _PYTHON_PREAMBLE + code
+                    if is_python_language(language):
+                        code = PYTHON_PREAMBLE + (
+                            "exec(compile(%r, \"<sandbox>\", \"exec\"), globals())\n" % code
+                        )
                     try:
                         result = subprocess.run(
                             [resolved, "-c", code],
@@ -139,10 +88,8 @@ class RayAdapter:
                     if len(cmd) >= 3 and cmd[0] in ("sh", "bash", "zsh") and cmd[1] == "-c":
                         # Shell string form (including nested shells from the
                         # args path): apply prelude and rewrite redirections.
-                        shell_cmd = cmd[2]
-                        shell_cmd = re.sub(r'(>[>]?\s*)(/[^\s])', r'\1${SANDBOX_ROOT}\2', shell_cmd)
-                        shell_cmd = re.sub(r'(<\s*)(/[^\s])', r'\1${SANDBOX_ROOT}\2', shell_cmd)
-                        cmd = ["bash", "-c", _SHELL_PRELUDE + shell_cmd] + [
+                        shell_cmd = rewrite_redirects(cmd[2])
+                        cmd = ["bash", "-c", SHELL_PRELUDE + shell_cmd] + [
                             self._resolve(a) if os.path.isabs(a) else a
                             for a in cmd[3:]
                         ]
