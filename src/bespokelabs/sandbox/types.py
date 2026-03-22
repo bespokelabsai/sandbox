@@ -8,13 +8,15 @@ class SandboxConfig:
     """Normalized configuration passed to every backend adapter.
 
     Not all backends honour every field:
-      - cpu / memory_mb: Daytona (defaults only), Tensorlake, Modal
+      - cpu / memory_mb: Daytona (defaults only), Tensorlake, Modal, Docker
       - disk_mb: Daytona only
-      - image: Modal (modal.Image name), Daytona (OCI image)
+      - image: Modal, Daytona (OCI image), Docker (e.g. "python:3.12-slim")
       - template: E2B only
       - app_name: Modal only
-      - allow_internet: Tensorlake, Daytona
+      - allow_internet: Tensorlake, Daytona, Docker
       - snapshot_id: Tensorlake, Modal
+      - env_vars: all backends
+      - timeout_secs: all backends (local and ray use subprocess timeout)
     """
 
     backend: str
