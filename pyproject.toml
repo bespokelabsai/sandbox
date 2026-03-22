@@ -1,0 +1,53 @@
+[project]
+name = "bespokelabs-sandbox"
+version = "0.1.0"
+description = "OpenRouter for Sandboxes - Unified Python API for cloud sandbox providers"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "Bespoke Labs" },
+]
+keywords = ["sandbox", "cloud", "daytona", "modal", "e2b", "tensorlake", "bespokelabs"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+[project.optional-dependencies]
+daytona = ["daytona>=0.1.0"]
+tensorlake = ["tensorlake>=0.1.0"]
+modal = ["modal>=0.60.0"]
+e2b = ["e2b-code-interpreter>=1.0.0"]
+all = [
+    "daytona>=0.1.0",
+    "tensorlake>=0.1.0",
+    "modal>=0.60.0",
+    "e2b-code-interpreter>=1.0.0",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

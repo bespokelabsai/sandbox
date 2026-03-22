@@ -1,0 +1,208 @@
+# OpenRouter for Sandboxes
+
+One API. Many sandbox providers.
+
+Just like [OpenRouter](https://openrouter.ai) gives you a single API across LLM providers, `bespokelabs-sandbox` gives you a unified interface across cloud sandbox providers. Write your code once, swap backends with a single parameter.
+
+## Install
+
+```bash
+pip install bespokelabs-sandbox
+```
+
+With a specific backend:
+
+```bash
+pip install bespokelabs-sandbox[daytona]
+pip install bespokelabs-sandbox[tensorlake]
+pip install bespokelabs-sandbox[modal]
+pip install bespokelabs-sandbox[e2b]
+pip install bespokelabs-sandbox[all]
+```
+
+## Supported Backends
+
+| Provider | Extra | Auth Env Var |
+|---|---|---|
+| [Daytona](https://www.daytona.io) | `[daytona]` | `DAYTONA_API_KEY` |
+| [Tensorlake](https://tensorlake.ai) | `[tensorlake]` | `tl login` |
+| [Modal](https://modal.com) | `[modal]` | `MODAL_TOKEN_ID` + `MODAL_TOKEN_SECRET` |
+| [E2B](https://e2b.dev) | `[e2b]` | `E2B_API_KEY` |
+
+You only need to install the provider you use. The others are lazily imported.
+
+## Quickstart
+
+```python
+from bespokelabs.sandbox import Sandbox
+
+with Sandbox("e2b") as sb:
+    result = sb.execute_code('print("hello from the cloud")')
+    print(result.stdout)
+```
+
+Switch providers by changing one string:
+
+```python
+with Sandbox("daytona") as sb:
+    ...
+
+with Sandbox("modal") as sb:
+    ...
+
+with Sandbox("tensorlake", cpu=2.0, memory_mb=4096) as sb:
+    ...
+```
+
+## API Reference
+
+### Creating a Sandbox
+
+```python
+from bespokelabs.sandbox import Sandbox
+
+sb = Sandbox(
+    backend,              # "daytona" | "tensorlake" | "modal" | "e2b"
+    *,
+    cpu=1.0,              # vCPUs (Tensorlake, Modal)
+    memory_mb=1024,       # RAM in MB (Tensorlake, Modal)
+    disk_mb=None,         # Disk in MB (Daytona)
+    timeout_secs=600,     # Max lifetime in seconds
+    image=None,           # Container image (Modal, Daytona)
+    template=None,        # Template ID (E2B)
+    env_vars=None,        # dict of environment variables
+    allow_internet=True,  # Network access (Tensorlake, Daytona)
+    app_name=None,        # App name (Modal)
+    snapshot_id=None,     # Restore from snapshot (Tensorlake, Modal)
+)
+```
+
+Not every backend uses every parameter. Unsupported params are silently ignored.
+
+### Executing Code
+
+```python
+result = sb.execute_code('print(1 + 1)', language="python")
+
+print(result.stdout)     # "2"
+print(result.stderr)     # ""
+print(result.exit_code)  # 0
+```
+
+`language` defaults to `"python"`. Daytona also supports `"typescript"`, `"javascript"`, `"ruby"`, and `"go"`. Tensorlake and Modal accept any installed binary name.
+
+### Running Shell Commands
+
+```python
+result = sb.execute_command("ls -la /tmp")
+result = sb.execute_command("grep", args=["-r", "TODO", "/app"])
+```
+
+### File Operations
+
+```python
+# List files
+files = sb.list_files("/home")
+for f in files:
+    print(f.path, f.is_dir, f.size)
+
+# Read / write in-memory content
+sb.write_file("/tmp/config.json", '{"key": "value"}')
+data = sb.read_file("/tmp/config.json")  # returns bytes
+
+# Upload a local file into the sandbox
+sb.upload_file("./local_data.csv", "/home/user/data.csv")
+
+# Download a file from the sandbox to local disk
+sb.download_file("/home/user/results.json", "./results.json")
+```
+
+### Snapshots
+
+```python
+snap = sb.snapshot()
+print(snap.snapshot_id)
+
+# Restore later
+sb2 = Sandbox("tensorlake", snapshot_id=snap.snapshot_id)
+```
+
+Supported by Tensorlake and Modal. Raises `FeatureNotSupportedError` on Daytona and E2B.
+
+### Lifecycle
+
+```python
+# Context manager (recommended) -- auto-destroys on exit
+with Sandbox("e2b") as sb:
+    sb.execute_code("print('hi')")
+
+# Manual cleanup
+sb = Sandbox("modal")
+sb.execute_code("print('hi')")
+sb.destroy()
+
+# Check state
+sb.is_alive       # True/False
+sb.backend_name   # "modal"
+```
+
+## Feature Support Matrix
+
+| Feature | Daytona | Tensorlake | Modal | E2B |
+|---|---|---|---|---|
+| `execute_code` | Python, TS, JS, Ruby, Go | Any binary | Any binary | Python |
+| `execute_command` | Shell | Shell | Shell | Shell |
+| `list_files` | Native SDK | via `ls` | Native SDK (alpha) | Native SDK |
+| `read_file` | Native SDK | via `cat` | Native SDK | Native SDK |
+| `write_file` | Native SDK | via base64 pipe | Native SDK | Native SDK |
+| `upload_file` | Native SDK | via base64 pipe | Native SDK | Native SDK |
+| `download_file` | Native SDK | via base64 | Native SDK | Native SDK |
+| `snapshot` | No | Yes (fs + memory) | Yes (filesystem) | No |
+| Resource config | Defaults only | cpu, memory_mb | cpu, memory, gpu | Tier-based |
+| Network control | Firewall, VPN | allow_internet flag | Tunnels | No |
+| GPU | No | No | Yes | No |
+| Async | Yes | No | Yes | No |
+
+## Exceptions
+
+```python
+from bespokelabs.sandbox import (
+    SandboxError,              # Base class for all errors
+    SandboxCreationError,      # Sandbox failed to start
+    SandboxExecutionError,     # Code or command execution failed
+    BackendNotInstalledError,  # pip package missing for chosen backend
+    FeatureNotSupportedError,  # Backend doesn't support this operation
+)
+```
+
+All exceptions inherit from `SandboxError`, so you can catch broadly or narrowly:
+
+```python
+try:
+    sb.snapshot()
+except FeatureNotSupportedError:
+    print("This backend doesn't support snapshots")
+except SandboxError as e:
+    print(f"Something else went wrong: {e}")
+```
+
+## Environment Variables
+
+Set the API key for whichever backend you use:
+
+```bash
+# Daytona
+export DAYTONA_API_KEY=your_key
+export DAYTONA_API_URL=https://app.daytona.io/api   # optional
+export DAYTONA_TARGET=us                              # optional
+
+# Tensorlake (authenticate via CLI)
+tl login
+
+# Modal
+export MODAL_TOKEN_ID=your_id
+export MODAL_TOKEN_SECRET=your_secret
+
+# E2B
+export E2B_API_KEY=your_key
+```
