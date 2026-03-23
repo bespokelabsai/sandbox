@@ -30,6 +30,7 @@ class SandboxConfig:
     app_name: str | None = None
     template: str | None = None
     snapshot_id: str | None = None
+    workdir: str | None = None
 
 
 @dataclass

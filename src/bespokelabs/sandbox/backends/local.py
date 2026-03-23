@@ -39,10 +39,17 @@ class LocalAdapter:
         self._workdir: str | None = None
         self._timeout: int = 600
         self._env: dict[str, str] | None = None
+        self._owns_workdir: bool = True
 
     def create(self, config: SandboxConfig) -> None:
         try:
-            self._workdir = tempfile.mkdtemp(prefix="sandbox_local_")
+            if config.workdir:
+                self._workdir = os.path.abspath(config.workdir)
+                os.makedirs(self._workdir, exist_ok=True)
+                self._owns_workdir = False
+            else:
+                self._workdir = tempfile.mkdtemp(prefix="sandbox_local_")
+                self._owns_workdir = True
             self._timeout = config.timeout_secs
             self._env = {**os.environ, **(config.env_vars or {})}
             self._env["SANDBOX_ROOT"] = self._workdir
@@ -183,7 +190,7 @@ class LocalAdapter:
 
     def destroy(self) -> None:
         try:
-            if self._workdir and os.path.exists(self._workdir):
+            if self._owns_workdir and self._workdir and os.path.exists(self._workdir):
                 shutil.rmtree(self._workdir, ignore_errors=True)
         except Exception:
             pass

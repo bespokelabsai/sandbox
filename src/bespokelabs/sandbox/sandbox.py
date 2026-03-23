@@ -45,6 +45,7 @@ class Sandbox:
         app_name: str | None = None,
         template: str | None = None,
         snapshot_id: str | None = None,
+        workdir: str | None = None,
     ) -> None:
         backend = backend.lower().strip()
         if backend not in BACKENDS:
@@ -72,6 +73,7 @@ class Sandbox:
             app_name=app_name,
             template=template,
             snapshot_id=snapshot_id,
+            workdir=workdir,
         )
         self._preset = resolved_preset
         self._adapter: SandboxBackend = BACKENDS[backend]()
