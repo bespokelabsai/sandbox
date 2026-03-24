@@ -1,8 +1,24 @@
-# OpenRouter for Sandboxes
+<p align="center">
+  <a href="https://bespokelabs.ai/" target="_blank">
+    <picture>
+      <source media="(prefers-color-scheme: light)" width="100px" srcset="https://github.com/bespokelabsai/curator/blob/main/docs/Bespoke-Labs-Logomark-Red-crop.png">
+      <img alt="Bespoke Labs Logo" width="100px" src="https://github.com/bespokelabsai/curator/blob/main/docs/Bespoke-Labs-Logomark-Red-crop.png">
+    </picture>
+  </a>
+</p>
 
-One API. Many sandbox providers.
+<h1 align="center">OpenRouter for Sandboxes</h1>
+<h3 align="center" style="font-size: 20px; margin-bottom: 4px">One API. Many sandbox providers.</h3>
+<br/>
 
 Just like [OpenRouter](https://openrouter.ai) gives you a single API across LLM providers, `bespokelabs-sandbox` gives you a unified interface across sandbox providers. Write your code once, swap backends with a single parameter.
+
+## Why?
+
+- **No lock-in** — Your code works across all backends. Switch providers without rewriting a single line.
+- **Easily move between providers** — If one provider has an outage or capacity issue, change one string and keep running.
+- **Cost tracking** — Monitor and compare spend across providers. *(coming soon)*
+- **Automatic scheduling to lowest cost provider** — Let the library route your workloads to the cheapest available backend. *(coming soon)*
 
 ## Install
 
