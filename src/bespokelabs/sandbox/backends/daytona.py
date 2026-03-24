@@ -20,7 +20,7 @@ class DaytonaAdapter:
 
     def create(self, config: SandboxConfig) -> None:
         try:
-            from daytona import Daytona, DaytonaConfig, CreateSandboxParams  # type: ignore[import-untyped]
+            from daytona import Daytona, DaytonaConfig  # type: ignore[import-untyped]
         except ImportError:
             raise BackendNotInstalledError(
                 "Daytona SDK not installed. Run: pip install bespokelabs-sandbox[daytona]"
@@ -37,26 +37,38 @@ class DaytonaAdapter:
         )
         self._client = Daytona(daytona_config)
 
-        params_kwargs: dict = {}
-        if config.env_vars:
-            params_kwargs["env_vars"] = config.env_vars
-        if config.image:
-            params_kwargs["image"] = config.image
-        if config.snapshot_id:
-            params_kwargs["snapshot_id"] = config.snapshot_id
-
         try:
-            params = CreateSandboxParams(**params_kwargs)
-            self._sandbox = self._client.create(params)
-        except Exception as exc:
-            try:
+            params = self._build_params(config)
+            if params is not None:
+                self._sandbox = self._client.create(params)
+            else:
                 self._sandbox = self._client.create()
-            except Exception:
-                raise SandboxCreationError(f"Failed to create Daytona sandbox: {exc}") from exc
+        except Exception as exc:
+            raise SandboxCreationError(f"Failed to create Daytona sandbox: {exc}") from exc
+
+    @staticmethod
+    def _build_params(config: SandboxConfig) -> object | None:
+        """Build the appropriate Daytona params object for the config."""
+        from daytona import CreateSandboxFromImageParams, CreateSandboxFromSnapshotParams  # type: ignore[import-untyped]
+
+        common: dict = {}
+        if config.env_vars:
+            common["env_vars"] = config.env_vars
+
+        if config.image:
+            return CreateSandboxFromImageParams(image=config.image, **common)
+
+        if config.snapshot_id:
+            return CreateSandboxFromSnapshotParams(snapshot=config.snapshot_id, **common)
+
+        if common:
+            return CreateSandboxFromSnapshotParams(**common)
+
+        return None
 
     def execute_code(self, code: str, language: str = "python") -> SandboxResult:
         try:
-            response = self._sandbox.process.code_run(code, language=language)
+            response = self._sandbox.process.code_run(code)
             return SandboxResult(
                 stdout=getattr(response, "result", "") or "",
                 stderr="",
