@@ -1,0 +1,269 @@
+{
+  "generated_at": "2026-03-27 13:58:35 PDT",
+  "title": "Filesystem Benchmark Report",
+  "providers": [
+    "daytona",
+    "tensorlake"
+  ],
+  "notes": [
+    "Benchmarks were run inside remote sandboxes created through the bespokelabs.sandbox API.",
+    "Each sample used cpu=1 and memory_mb=1024.",
+    "Write timings are buffered filesystem timings. The workload did not call fsync(), so results reflect page-cache speed rather than durable commit latency."
+  ],
+  "passes": [
+    {
+      "name": "Light pass",
+      "workload": {
+        "samples_per_backend": 4,
+        "large_file_bytes": 16777216,
+        "small_file_count": 200,
+        "small_file_bytes": 16384
+      },
+      "results": {
+        "daytona": {
+          "create_ms": {
+            "max": 2344.5,
+            "mean": 741.4,
+            "min": 204.5,
+            "p50": 209.4,
+            "p95": 2344.5
+          },
+          "exec_ms": {
+            "max": 524.2,
+            "mean": 469.7,
+            "min": 407.7,
+            "p50": 478.2,
+            "p95": 524.2
+          },
+          "large_read_ms": {
+            "max": 16.8,
+            "mean": 9.5,
+            "min": 6.8,
+            "p50": 7.2,
+            "p95": 16.8
+          },
+          "large_write_ms": {
+            "max": 22.3,
+            "mean": 11.3,
+            "min": 1.2,
+            "p50": 20.5,
+            "p95": 22.3
+          },
+          "list_stat_ms": {
+            "max": 3.4,
+            "mean": 2.4,
+            "min": 1.9,
+            "p50": 2.1,
+            "p95": 3.4
+          },
+          "small_read_ms": {
+            "max": 4.4,
+            "mean": 2.8,
+            "min": 2.3,
+            "p50": 2.3,
+            "p95": 4.4
+          },
+          "small_write_ms": {
+            "max": 24.5,
+            "mean": 14.3,
+            "min": 10.7,
+            "p50": 11.3,
+            "p95": 24.5
+          },
+          "total_ms": {
+            "max": 2813.4,
+            "mean": 1213.2,
+            "min": 620.1,
+            "p50": 731.8,
+            "p95": 2813.4
+          }
+        },
+        "tensorlake": {
+          "create_ms": {
+            "max": 556.5,
+            "mean": 445.7,
+            "min": 382.5,
+            "p50": 443.5,
+            "p95": 556.5
+          },
+          "exec_ms": {
+            "max": 1571.5,
+            "mean": 1545.2,
+            "min": 1512.0,
+            "p50": 1559.5,
+            "p95": 1571.5
+          },
+          "large_read_ms": {
+            "max": 16.7,
+            "mean": 16.6,
+            "min": 16.5,
+            "p50": 16.5,
+            "p95": 16.7
+          },
+          "large_write_ms": {
+            "max": 15.6,
+            "mean": 15.4,
+            "min": 15.2,
+            "p50": 15.4,
+            "p95": 15.6
+          },
+          "list_stat_ms": {
+            "max": 1.2,
+            "mean": 1.2,
+            "min": 1.2,
+            "p50": 1.2,
+            "p95": 1.2
+          },
+          "small_read_ms": {
+            "max": 1.1,
+            "mean": 1.1,
+            "min": 1.1,
+            "p50": 1.1,
+            "p95": 1.1
+          },
+          "small_write_ms": {
+            "max": 5.6,
+            "mean": 5.6,
+            "min": 5.6,
+            "p50": 5.6,
+            "p95": 5.6
+          },
+          "total_ms": {
+            "max": 2094.2,
+            "mean": 1993.0,
+            "min": 1920.2,
+            "p50": 2015.3,
+            "p95": 2094.2
+          }
+        }
+      }
+    },
+    {
+      "name": "Heavy pass",
+      "workload": {
+        "samples_per_backend": 3,
+        "large_file_bytes": 67108864,
+        "small_file_count": 1000,
+        "small_file_bytes": 16384
+      },
+      "results": {
+        "daytona": {
+          "create_ms": {
+            "max": 2465.3,
+            "mean": 975.3,
+            "min": 214.7,
+            "p50": 245.9,
+            "p95": 2465.3
+          },
+          "exec_ms": {
+            "max": 664.4,
+            "mean": 587.1,
+            "min": 543.0,
+            "p50": 553.8,
+            "p95": 664.4
+          },
+          "large_read_ms": {
+            "max": 31.5,
+            "mean": 30.3,
+            "min": 29.6,
+            "p50": 29.8,
+            "p95": 31.5
+          },
+          "large_write_ms": {
+            "max": 5.2,
+            "mean": 4.8,
+            "min": 4.5,
+            "p50": 4.6,
+            "p95": 5.2
+          },
+          "list_stat_ms": {
+            "max": 8.2,
+            "mean": 7.5,
+            "min": 7.1,
+            "p50": 7.3,
+            "p95": 8.2
+          },
+          "small_read_ms": {
+            "max": 14.2,
+            "mean": 13.2,
+            "min": 12.3,
+            "p50": 12.9,
+            "p95": 14.2
+          },
+          "small_write_ms": {
+            "max": 63.7,
+            "mean": 59.0,
+            "min": 55.7,
+            "p50": 57.7,
+            "p95": 63.7
+          },
+          "total_ms": {
+            "max": 3129.7,
+            "mean": 1564.9,
+            "min": 761.1,
+            "p50": 803.8,
+            "p95": 3129.7
+          }
+        },
+        "tensorlake": {
+          "create_ms": {
+            "max": 692.6,
+            "mean": 504.1,
+            "min": 409.7,
+            "p50": 410.0,
+            "p95": 692.6
+          },
+          "exec_ms": {
+            "max": 1534.6,
+            "mean": 1509.4,
+            "min": 1488.3,
+            "p50": 1505.3,
+            "p95": 1534.6
+          },
+          "large_read_ms": {
+            "max": 66.9,
+            "mean": 66.8,
+            "min": 66.8,
+            "p50": 66.8,
+            "p95": 66.9
+          },
+          "large_write_ms": {
+            "max": 61.3,
+            "mean": 61.2,
+            "min": 61.1,
+            "p50": 61.1,
+            "p95": 61.3
+          },
+          "list_stat_ms": {
+            "max": 5.1,
+            "mean": 5.1,
+            "min": 5.1,
+            "p50": 5.1,
+            "p95": 5.1
+          },
+          "small_read_ms": {
+            "max": 6.3,
+            "mean": 6.2,
+            "min": 6.2,
+            "p50": 6.2,
+            "p95": 6.3
+          },
+          "small_write_ms": {
+            "max": 28.0,
+            "mean": 27.9,
+            "min": 27.8,
+            "p50": 27.9,
+            "p95": 28.0
+          },
+          "total_ms": {
+            "max": 2197.9,
+            "mean": 2013.7,
+            "min": 1898.5,
+            "p50": 1944.7,
+            "p95": 2197.9
+          }
+        }
+      }
+    }
+  ]
+}

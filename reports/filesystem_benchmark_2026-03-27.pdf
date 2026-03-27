@@ -1,0 +1,105 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>
+endobj
+4 0 obj
+<< /Length 4410 >>
+stream
+BT /F2 20 Tf 1 0 0 1 54 738.0 Tm (Filesystem Benchmark Report) Tj ET
+BT /F1 11 Tf 1 0 0 1 54 711.0 Tm (Generated from benchmark runs captured at 2026-03-27 13:58:35 PDT) Tj ET
+0.75 w 54 693.0 m 558 693.0 l S
+BT /F2 14 Tf 1 0 0 1 54 681.0 Tm (Executive Summary) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 663.0 Tm (Daytona delivered lower end-to-end sandbox latency in both passes, while Tensorlake) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 650.0 Tm (was better on the small-file operations inside the sandbox. Daytona was stronger on) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 637.0 Tm (the large buffered sequential file path, but its create times showed a colder-start) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 624.0 Tm (profile.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 605.0 Tm (Methodology) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 587.0 Tm (- Benchmarks were run inside remote sandboxes created through the bespokelabs.sandbox) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 574.0 Tm (API.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 561.0 Tm (- Each sample used cpu=1 and memory_mb=1024.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 548.0 Tm (- Write timings are buffered filesystem timings. The workload did not call fsync\(\), so) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 535.0 Tm ( results reflect page-cache speed rather than durable commit latency.) Tj ET
+BT /F2 15 Tf 1 0 0 1 54 516.0 Tm (Light pass) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 496.0 Tm (Samples per backend: 4. Large file: 16 MiB. Small files: 200 x 16 KiB.) Tj ET
+BT /F3 9 Tf 1 0 0 1 54 479.0 Tm (Backend     Create p50  Exec mean  Total p50  Large wr  Large rd  Small wr  List/stat  Small rd) Tj ET
+BT /F3 9 Tf 1 0 0 1 54 466.0 Tm (----------  ----------  ---------  ---------  --------  --------  --------  ---------  --------) Tj ET
+BT /F3 9 Tf 1 0 0 1 54 453.0 Tm (daytona     209.4       469.7      731.8      11.3      9.5       14.3      2.4        2.8     ) Tj ET
+BT /F3 9 Tf 1 0 0 1 54 440.0 Tm (tensorlake  443.5       1545.2     2015.3     15.4      16.6      5.6       1.2        1.1     ) Tj ET
+BT /F2 12 Tf 1 0 0 1 54 423.0 Tm (Observations) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 407.0 Tm (- For light pass, Daytona had the lower end-to-end latency: p50 total 731.8 ms vs) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 394.0 Tm (2015.3 ms \(2.8x lower\).) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 381.0 Tm (- Daytona also had lower execute_code wall time: mean 469.7 ms vs 1545.2 ms \(3.3x) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 368.0 Tm (lower\).) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 355.0 Tm (- Within the sandbox, Daytona was stronger on the large buffered file path: 1.4x) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 342.0 Tm (faster writes and 1.7x faster reads.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 329.0 Tm (- Tensorlake was stronger on the small-file path: 2.6x faster small-file writes and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 316.0 Tm (2.5x faster small-file reads.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 303.0 Tm (- Daytona showed a cold-start spike in create time: p50 209.4 ms, p95 2344.5 ms.) Tj ET
+BT /F2 15 Tf 1 0 0 1 54 282.0 Tm (Heavy pass) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 262.0 Tm (Samples per backend: 3. Large file: 64 MiB. Small files: 1000 x 16 KiB.) Tj ET
+BT /F3 9 Tf 1 0 0 1 54 245.0 Tm (Backend     Create p50  Exec mean  Total p50  Large wr  Large rd  Small wr  List/stat  Small rd) Tj ET
+BT /F3 9 Tf 1 0 0 1 54 232.0 Tm (----------  ----------  ---------  ---------  --------  --------  --------  ---------  --------) Tj ET
+BT /F3 9 Tf 1 0 0 1 54 219.0 Tm (daytona     245.9       587.1      803.8      4.8       30.3      59.0      7.5        13.2    ) Tj ET
+BT /F3 9 Tf 1 0 0 1 54 206.0 Tm (tensorlake  410.0       1509.4     1944.7     61.2      66.8      27.9      5.1        6.2     ) Tj ET
+BT /F2 12 Tf 1 0 0 1 54 189.0 Tm (Observations) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 173.0 Tm (- For heavy pass, Daytona had the lower end-to-end latency: p50 total 803.8 ms vs) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 160.0 Tm (1944.7 ms \(2.4x lower\).) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 147.0 Tm (- Daytona also had lower execute_code wall time: mean 587.1 ms vs 1509.4 ms \(2.6x) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 134.0 Tm (lower\).) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 121.0 Tm (- Within the sandbox, Daytona was stronger on the large buffered file path: 12.8x) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 108.0 Tm (faster writes and 2.2x faster reads.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 95.0 Tm (- Tensorlake was stronger on the small-file path: 2.1x faster small-file writes and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 82.0 Tm (2.1x faster small-file reads.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 4 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Length 1076 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54 738.0 Tm (- Daytona showed a cold-start spike in create time: p50 245.9 ms, p95 2465.3 ms.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 717.0 Tm (Interpretation) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 699.0 Tm (These numbers separate transport and sandbox lifecycle cost from the filesystem work) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 686.0 Tm (itself. The create/execute/total metrics include provider API, provisioning, and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 673.0 Tm (execution overhead. The in-sandbox file metrics isolate the workload timing reported) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 660.0 Tm (by the code running inside the sandbox.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 643.0 Tm (Because the workloads were buffered writes with no fsync\(\), the write results should) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 630.0 Tm (be treated as cache-backed filesystem speed, not a durability guarantee. If you need) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 617.0 Tm (storage durability numbers, the next pass should force flushes and likely repeat with) Tj ET
+BT /F1 10 Tf 1 0 0 1 54 604.0 Tm (larger sample counts.) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 4 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Type /Pages /Count 2 /Kids [5 0 R 7 0 R] >>
+endobj
+9 0 obj
+<< /Type /Catalog /Pages 4 0 R >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000015 00000 n 
+0000000085 00000 n 
+0000000160 00000 n 
+0000000228 00000 n 
+0000004690 00000 n 
+0000004836 00000 n 
+0000005964 00000 n 
+0000006110 00000 n 
+0000006173 00000 n 
+trailer
+<< /Size 10 /Root 9 0 R >>
+startxref
+6222
+%%EOF
