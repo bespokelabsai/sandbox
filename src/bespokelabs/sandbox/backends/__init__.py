@@ -6,6 +6,7 @@ from bespokelabs.sandbox.backends.e2b import E2BAdapter
 from bespokelabs.sandbox.backends.local import LocalAdapter
 from bespokelabs.sandbox.backends.modal import ModalAdapter
 from bespokelabs.sandbox.backends.ray import RayAdapter
+from bespokelabs.sandbox.backends.safehouse import SafehouseAdapter
 from bespokelabs.sandbox.backends.tensorlake import TensorlakeAdapter
 
 BACKENDS: dict[str, type] = {
@@ -16,4 +17,5 @@ BACKENDS: dict[str, type] = {
     "docker": DockerAdapter,
     "local": LocalAdapter,
     "ray": RayAdapter,
+    "safehouse": SafehouseAdapter,
 }
