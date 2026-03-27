@@ -34,8 +34,8 @@ class E2BAdapter:
             if config.template:
                 kwargs["template"] = config.template
             if config.env_vars:
-                kwargs["env_vars"] = config.env_vars
-            self._sandbox = E2BSandbox(**kwargs)
+                kwargs["envs"] = config.env_vars
+            self._sandbox = E2BSandbox.create(**kwargs)
         except Exception as exc:
             raise SandboxCreationError(f"Failed to create E2B sandbox: {exc}") from exc
 
