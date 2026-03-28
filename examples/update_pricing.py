@@ -11,13 +11,14 @@ Usage:
 """
 
 import argparse
+import dataclasses
 import json
 import os
 import sys
 from datetime import date
 from pathlib import Path
 
-from bespokelabs.sandbox import Sandbox
+from bespokelabs.sandbox import Sandbox, SandboxExecutionError
 
 PRICING_JSON = Path(__file__).resolve().parent.parent / "src" / "bespokelabs" / "sandbox" / "pricing.json"
 WORKDIR = os.path.join(os.path.dirname(__file__), ".sandbox_workdir")
@@ -47,21 +48,25 @@ CLOUD_PROVIDERS = {
     },
 }
 
+@dataclasses.dataclass
+class ProviderPricing:
+    vcpu_per_hour_usd: float = 0.0
+    ram_gib_per_hour_usd: float = 0.0
+    storage_gib_per_month_usd: float = 0.0
+    per_execution_usd: float = 0.0
+    free_tier: str | None = None
+    pricing_url: str | None = None
+    notes: str = ""
+
+
 PROMPT_TEMPLATE = """Find the exact, current pricing for {name} ({description}).
 
 Check their pricing page at {url} and any other relevant docs or blog posts.
 I need the actual dollar amounts — not just tier names.
 
-Return ONLY a JSON object (no markdown fences, no explanation) with exactly these fields:
-{{
-  "vcpu_per_hour_usd": <number>,
-  "ram_gib_per_hour_usd": <number>,
-  "storage_gib_per_month_usd": <number>,
-  "per_execution_usd": <number>,
-  "free_tier": <string or null>,
-  "pricing_url": "<url you found pricing on>",
-  "notes": "<one-line summary of pricing model>"
-}}
+Return ONLY a JSON object with these fields:
+  vcpu_per_hour_usd, ram_gib_per_hour_usd, storage_gib_per_month_usd,
+  per_execution_usd, free_tier (string or null), pricing_url, notes.
 
 Rules:
 - Use 0.0 if a dimension is not charged separately (e.g. RAM included in vCPU price).
@@ -71,39 +76,19 @@ Rules:
 """
 
 
-def fetch_provider_pricing(sb, provider_key: str) -> dict | None:
+def fetch_provider_pricing(sb, provider_key: str) -> ProviderPricing | None:
     """Ask Claude Code inside the sandbox to look up pricing for one provider."""
     provider = CLOUD_PROVIDERS[provider_key]
     prompt = PROMPT_TEMPLATE.format(**provider)
 
-    result = sb.execute_command(
-        "claude",
-        args=[
-            "-p", prompt,
-            "--output-format", "text",
-            "--allowedTools", "WebSearch,WebFetch",
-        ],
-    )
-
-    if result.exit_code != 0:
-        print(f"  WARNING: Claude Code exited {result.exit_code} for {provider_key}", file=sys.stderr)
-        if result.stderr:
-            print(f"  stderr: {result.stderr[:200]}", file=sys.stderr)
-        return None
-
-    # Parse JSON from the response — strip any accidental markdown fences
-    text = result.stdout.strip()
-    if text.startswith("```"):
-        text = "\n".join(text.split("\n")[1:])
-    if text.endswith("```"):
-        text = "\n".join(text.split("\n")[:-1])
-    text = text.strip()
-
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        print(f"  WARNING: Could not parse JSON for {provider_key}", file=sys.stderr)
-        print(f"  Raw output: {text[:300]}", file=sys.stderr)
+        return sb.execute_command(
+            "claude",
+            args=["-p", prompt, "--output-format", "text", "--allowedTools", "WebSearch,WebFetch"],
+            return_type=ProviderPricing,
+        )
+    except SandboxExecutionError as e:
+        print(f"  WARNING: {provider_key}: {e}", file=sys.stderr)
         return None
 
 
@@ -146,15 +131,8 @@ def main() -> None:
                 print(f"  SKIPPED {provider_key} (fetch failed)\n")
                 continue
 
-            # Validate required fields
-            expected_fields = {"vcpu_per_hour_usd", "ram_gib_per_hour_usd", "storage_gib_per_month_usd",
-                               "per_execution_usd", "free_tier", "pricing_url", "notes"}
-            missing = expected_fields - set(result.keys())
-            if missing:
-                print(f"  WARNING: Missing fields for {provider_key}: {missing}", file=sys.stderr)
-
-            pricing["backends"][provider_key] = result
-            print(f"  OK: {provider_key} -> ${result.get('vcpu_per_hour_usd', '?')}/vCPU-hr\n")
+            pricing["backends"][provider_key] = dataclasses.asdict(result)
+            print(f"  OK: {provider_key} -> ${result.vcpu_per_hour_usd}/vCPU-hr\n")
 
     pricing["last_updated"] = date.today().isoformat()
 
