@@ -1,6 +1,6 @@
 [project]
 name = "bespokelabs-sandbox"
-version = "0.1.0"
+version = "0.1.1"
 description = "OpenRouter for Sandboxes - Unified Python API for cloud sandbox providers"
 readme = "README.md"
 license = "Apache-2.0"
@@ -46,6 +46,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"bespokelabs.sandbox" = ["pricing.json"]
 
 [tool.ruff]
 line-length = 120

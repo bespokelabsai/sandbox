@@ -1,0 +1,78 @@
+{
+  "last_updated": "2026-03-28",
+  "note": "Prices are best-effort estimates. Run examples/update_pricing.py to refresh from the web.",
+  "backends": {
+    "local": {
+      "vcpu_per_hour_usd": 0.0,
+      "ram_gib_per_hour_usd": 0.0,
+      "storage_gib_per_month_usd": 0.0,
+      "per_execution_usd": 0.0,
+      "free_tier": null,
+      "pricing_url": null,
+      "notes": "Free — runs on the local machine."
+    },
+    "docker": {
+      "vcpu_per_hour_usd": 0.0,
+      "ram_gib_per_hour_usd": 0.0,
+      "storage_gib_per_month_usd": 0.0,
+      "per_execution_usd": 0.0,
+      "free_tier": null,
+      "pricing_url": null,
+      "notes": "Free — runs on the local Docker daemon."
+    },
+    "safehouse": {
+      "vcpu_per_hour_usd": 0.0,
+      "ram_gib_per_hour_usd": 0.0,
+      "storage_gib_per_month_usd": 0.0,
+      "per_execution_usd": 0.0,
+      "free_tier": null,
+      "pricing_url": null,
+      "notes": "Free — macOS sandbox-exec on the local machine."
+    },
+    "ray": {
+      "vcpu_per_hour_usd": 0.0,
+      "ram_gib_per_hour_usd": 0.0,
+      "storage_gib_per_month_usd": 0.0,
+      "per_execution_usd": 0.0,
+      "free_tier": null,
+      "pricing_url": null,
+      "notes": "Free locally. Remote cluster costs depend on cloud provider."
+    },
+    "e2b": {
+      "vcpu_per_hour_usd": 0.083,
+      "ram_gib_per_hour_usd": 0.0,
+      "storage_gib_per_month_usd": 0.0,
+      "per_execution_usd": 0.0,
+      "free_tier": "100 sandbox hours/month on Hobby plan",
+      "pricing_url": "https://e2b.dev/pricing",
+      "notes": "Billed per vCPU-hour. RAM included in vCPU price."
+    },
+    "daytona": {
+      "vcpu_per_hour_usd": 0.036,
+      "ram_gib_per_hour_usd": 0.018,
+      "storage_gib_per_month_usd": 0.0003,
+      "per_execution_usd": 0.0,
+      "free_tier": "Free tier available",
+      "pricing_url": "https://www.daytona.io/pricing",
+      "notes": "Billed per vCPU-hour + per GiB RAM-hour + storage."
+    },
+    "modal": {
+      "vcpu_per_hour_usd": 0.047,
+      "ram_gib_per_hour_usd": 0.0098,
+      "storage_gib_per_month_usd": 0.0,
+      "per_execution_usd": 0.0,
+      "free_tier": "$30/month free compute credits",
+      "pricing_url": "https://modal.com/pricing",
+      "notes": "Billed per vCPU-second + per GiB RAM-second. Per-second granularity."
+    },
+    "tensorlake": {
+      "vcpu_per_hour_usd": 0.05,
+      "ram_gib_per_hour_usd": 0.0,
+      "storage_gib_per_month_usd": 0.0,
+      "per_execution_usd": 0.0,
+      "free_tier": null,
+      "pricing_url": "https://tensorlake.ai",
+      "notes": "Estimated. Check Tensorlake docs for current rates."
+    }
+  }
+}
