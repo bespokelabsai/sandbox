@@ -295,18 +295,23 @@ def _parse_result(result: SandboxResult, return_type: type[T]) -> T:
 
     data = _extract_json(result.stdout)
 
-    # Pydantic v2
-    if hasattr(return_type, "model_validate"):
-        return return_type.model_validate(data)
+    try:
+        # Pydantic v2
+        if hasattr(return_type, "model_validate"):
+            return return_type.model_validate(data)
 
-    # Dataclass — only pass fields the dataclass declares
-    if dataclasses.is_dataclass(return_type):
-        field_names = {f.name for f in dataclasses.fields(return_type)}
-        filtered = {k: v for k, v in data.items() if k in field_names}
-        return return_type(**filtered)
+        # Dataclass — only pass fields the dataclass declares
+        if dataclasses.is_dataclass(return_type):
+            field_names = {f.name for f in dataclasses.fields(return_type)}
+            filtered = {k: v for k, v in data.items() if k in field_names}
+            return return_type(**filtered)
 
-    # Fallback — plain class with **kwargs init
-    return return_type(**data)
+        # Fallback — plain class with **kwargs init
+        return return_type(**data)
+    except Exception as exc:
+        raise SandboxExecutionError(
+            f"Failed to construct {return_type.__name__} from parsed JSON: {exc}"
+        ) from exc
 
 
 # -- Schema generation ---------------------------------------------------------

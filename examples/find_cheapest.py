@@ -39,6 +39,7 @@ class BenchmarkResult:
 
 
 def benchmark_backend(backend: str) -> BenchmarkResult:
+    sb = None
     try:
         t0 = time.perf_counter()
         sb = Sandbox(backend)
@@ -47,8 +48,6 @@ def benchmark_backend(backend: str) -> BenchmarkResult:
         t1 = time.perf_counter()
         result = sb.execute_code(BENCHMARK_CODE)
         exec_time = time.perf_counter() - t1
-
-        sb.destroy()
 
         total = cold_start + exec_time
         cps = cost_per_second(backend)
@@ -72,6 +71,9 @@ def benchmark_backend(backend: str) -> BenchmarkResult:
             success=False,
             error=str(e),
         )
+    finally:
+        if sb is not None:
+            sb.destroy()
 
 
 def find_cheapest(backends: list[str], parallel: bool = True) -> list[BenchmarkResult]:
@@ -131,15 +133,15 @@ def main() -> None:
         print_pricing_table(backends)
         return
 
-    print(f"Benchmarking: {', '.join(backends)}")
-    print_pricing_table(backends)
+    if not args.json:
+        print(f"Benchmarking: {', '.join(backends)}")
+        print_pricing_table(backends)
+        print("\nRunning benchmarks...")
 
-    print("\nRunning benchmarks...")
     results = find_cheapest(backends, parallel=not args.sequential)
 
     if args.json:
-        out = [asdict(r) for r in results]
-        print(json.dumps(out, indent=2))
+        print(json.dumps([asdict(r) for r in results], indent=2))
     else:
         print_table(results)
 

@@ -116,10 +116,11 @@ def main() -> None:
     print(f"Fetching pricing for: {', '.join(providers)}")
     print("Using sandbox with Claude Code preset...\n")
 
-    with Sandbox("local", preset="claude-code", env_vars={"ANTHROPIC_API_KEY": api_key}, workdir=WORKDIR) as sb:
-        if args.model:
-            # Set model via env var for subsequent claude calls
-            sb.execute_command("export", args=[f"CLAUDE_MODEL={args.model}"])
+    env_vars = {"ANTHROPIC_API_KEY": api_key}
+    if args.model:
+        env_vars["CLAUDE_MODEL"] = args.model
+
+    with Sandbox("local", preset="claude-code", env_vars=env_vars, workdir=WORKDIR) as sb:
 
         for provider_key in providers:
             print(f"  Fetching {provider_key}...")
