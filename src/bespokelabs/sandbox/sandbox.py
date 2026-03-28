@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import dataclasses
+import json
+import re
+from typing import TypeVar, overload
+
 from bespokelabs.sandbox.backends import BACKENDS
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
@@ -10,6 +15,8 @@ from bespokelabs.sandbox.exceptions import (
 from bespokelabs.sandbox.presets import PRESETS, SandboxPreset, get_preset, register_preset
 from bespokelabs.sandbox.protocols import SandboxBackend
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
+
+T = TypeVar("T")
 
 
 class Sandbox:
@@ -99,15 +106,45 @@ class Sandbox:
 
     # -- Core operations ---------------------------------------------------
 
-    def execute_code(self, code: str, language: str = "python") -> SandboxResult:
-        """Execute a code snippet and return stdout/stderr/exit_code."""
-        self._check_alive()
-        return self._adapter.execute_code(code, language)
+    @overload
+    def execute_code(self, code: str, language: str = "python") -> SandboxResult: ...
 
-    def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult:
-        """Execute a shell command and return stdout/stderr/exit_code."""
+    @overload
+    def execute_code(self, code: str, language: str = "python", *, return_type: type[T]) -> T: ...
+
+    def execute_code(self, code: str, language: str = "python", *, return_type: type[T] | None = None) -> SandboxResult | T:
+        """Execute a code snippet and return stdout/stderr/exit_code.
+
+        If *return_type* is given, parse stdout as JSON and return an
+        instance of that type instead of SandboxResult.  Works with
+        dataclasses, Pydantic models, and any class whose ``__init__``
+        accepts ``**kwargs``.
+        """
         self._check_alive()
-        return self._adapter.execute_command(command, args)
+        result = self._adapter.execute_code(code, language)
+        if return_type is not None:
+            return _parse_result(result, return_type)
+        return result
+
+    @overload
+    def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult: ...
+
+    @overload
+    def execute_command(self, command: str, args: list[str] | None = None, *, return_type: type[T]) -> T: ...
+
+    def execute_command(self, command: str, args: list[str] | None = None, *, return_type: type[T] | None = None) -> SandboxResult | T:
+        """Execute a shell command and return stdout/stderr/exit_code.
+
+        If *return_type* is given, parse stdout as JSON and return an
+        instance of that type instead of SandboxResult.  Works with
+        dataclasses, Pydantic models, and any class whose ``__init__``
+        accepts ``**kwargs``.
+        """
+        self._check_alive()
+        result = self._adapter.execute_command(command, args)
+        if return_type is not None:
+            return _parse_result(result, return_type)
+        return result
 
     # -- File operations ---------------------------------------------------
 
@@ -194,3 +231,77 @@ class Sandbox:
                     f"Preset '{preset.name}' setup failed on command: {cmd}\n"
                     f"exit_code={result.exit_code}\nstderr={result.stderr}"
                 )
+
+
+# -- Structured output parsing ------------------------------------------------
+
+# Regex to strip markdown code fences that LLMs often wrap JSON in.
+_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
+
+
+def _extract_json(text: str) -> dict:
+    """Best-effort extraction of a JSON object from *text*.
+
+    Tries, in order:
+    1. Direct ``json.loads`` on the stripped text.
+    2. Contents of the first markdown code fence.
+    3. Substring from the first ``{`` to the last ``}``.
+    """
+    text = text.strip()
+
+    # 1. Direct parse
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # 2. Markdown fence
+    m = _FENCE_RE.search(text)
+    if m:
+        try:
+            obj = json.loads(m.group(1))
+            if isinstance(obj, dict):
+                return obj
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # 3. First { … last }
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            obj = json.loads(text[start : end + 1])
+            if isinstance(obj, dict):
+                return obj
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    raise SandboxExecutionError(
+        f"Could not extract JSON object from stdout:\n{text[:500]}"
+    )
+
+
+def _parse_result(result: SandboxResult, return_type: type[T]) -> T:
+    """Parse a SandboxResult's stdout into *return_type*."""
+    if result.exit_code != 0:
+        raise SandboxExecutionError(
+            f"Command failed (exit {result.exit_code}) before parsing return_type.\n"
+            f"stderr: {result.stderr[:500]}"
+        )
+
+    data = _extract_json(result.stdout)
+
+    # Pydantic v2
+    if hasattr(return_type, "model_validate"):
+        return return_type.model_validate(data)
+
+    # Dataclass — only pass fields the dataclass declares
+    if dataclasses.is_dataclass(return_type):
+        field_names = {f.name for f in dataclasses.fields(return_type)}
+        filtered = {k: v for k, v in data.items() if k in field_names}
+        return return_type(**filtered)
+
+    # Fallback — plain class with **kwargs init
+    return return_type(**data)
