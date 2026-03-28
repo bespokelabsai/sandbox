@@ -62,6 +62,16 @@ register_preset(SandboxPreset(
 ))
 
 register_preset(SandboxPreset(
+    name="codex",
+    description="Sandbox with Codex CLI installed",
+    setup_commands=[
+        "npm install -g @openai/codex",
+    ],
+    memory_mb=2048,
+    timeout_secs=1800,
+))
+
+register_preset(SandboxPreset(
     name="python-data-science",
     description="Python with numpy, pandas, matplotlib, scikit-learn",
     setup_commands=[

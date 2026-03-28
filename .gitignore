@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.pyo
+dist/
+examples/.sandbox_workdir/
+examples/__pycache__/

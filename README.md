@@ -38,6 +38,12 @@ pip install bespokelabs-sandbox[ray]
 pip install bespokelabs-sandbox[all]
 ```
 
+The Safehouse backend has no Python extra. Install the CLI separately on macOS:
+
+```bash
+brew install eugene1g/safehouse/agent-safehouse
+```
+
 ## Supported Backends
 
 ### Local
@@ -47,6 +53,7 @@ No API keys, no cloud accounts. Just works.
 | Backend | Extra | Requires |
 |---|---|---|
 | Local subprocess | _(none)_ | Python installed |
+| [Agent Safehouse](https://github.com/eugene1g/agent-safehouse) | _(none)_ | macOS + `safehouse` CLI |
 | [Docker](https://www.docker.com) | `[docker]` | Docker daemon running |
 | [Ray](https://www.ray.io) | `[ray]` | Ray installed (local or remote cluster) |
 
@@ -71,6 +78,11 @@ with Sandbox("local") as sb:
     result = sb.execute_code('print("hello")')
     print(result.stdout)
 
+# Or use Safehouse on macOS
+with Sandbox("safehouse") as sb:
+    result = sb.execute_code('print("hello from safehouse")')
+    print(result.stdout)
+
 # Or use Docker
 with Sandbox("docker") as sb:
     result = sb.execute_code('print("hello from a container")')
@@ -85,7 +97,7 @@ with Sandbox("e2b") as sb:
 Switch backends by changing one string:
 
 ```python
-for backend in ["local", "docker", "modal", "e2b", "daytona", "tensorlake", "ray"]:
+for backend in ["local", "safehouse", "docker", "modal", "e2b", "daytona", "tensorlake", "ray"]:
     with Sandbox(backend) as sb:
         sb.execute_code('print("same code, any backend")')
 ```
@@ -98,7 +110,7 @@ for backend in ["local", "docker", "modal", "e2b", "daytona", "tensorlake", "ray
 from bespokelabs.sandbox import Sandbox
 
 sb = Sandbox(
-    backend,              # "local" | "docker" | "ray" | "daytona" | "tensorlake" | "modal" | "e2b"
+    backend,              # "local" | "safehouse" | "docker" | "ray" | "daytona" | "tensorlake" | "modal" | "e2b"
     *,
     preset=None,          # Preset name or SandboxPreset object
     cpu=1.0,              # vCPUs (Tensorlake, Modal, Docker)
@@ -111,6 +123,7 @@ sb = Sandbox(
     allow_internet=True,  # Network access (Docker, Tensorlake, Daytona)
     app_name=None,        # App name (Modal)
     snapshot_id=None,     # Restore from snapshot (Tensorlake, Modal)
+    workdir=None,         # Host directory to use as sandbox root (Safehouse)
 )
 ```
 
@@ -126,7 +139,7 @@ print(result.stderr)     # ""
 print(result.exit_code)  # 0
 ```
 
-`language` defaults to `"python"`. Daytona also supports `"typescript"`, `"javascript"`, `"ruby"`, and `"go"`. Docker, Tensorlake, Modal, Local, and Ray accept any installed binary name.
+`language` defaults to `"python"`. Daytona also supports `"typescript"`, `"javascript"`, `"ruby"`, and `"go"`. Safehouse, Docker, Tensorlake, Modal, Local, and Ray accept any installed binary name.
 
 ### Running Shell Commands
 
@@ -157,8 +170,13 @@ sb.download_file("/home/user/results.json", "./results.json")
 ### Presets
 
 Presets are predefined sandbox configurations with setup commands that run after creation.
+Presets that install tools with `npm`, such as `codex`, `claude-code`, and `web-dev`, assume the sandbox image already includes Node.js and `npm`.
 
 ```python
+# Sandbox with Codex CLI installed
+with Sandbox("docker", preset="codex") as sb:
+    sb.execute_command("codex --version")
+
 # Sandbox with Claude Code installed
 with Sandbox("docker", preset="claude-code") as sb:
     sb.execute_command("claude --version")
@@ -173,6 +191,7 @@ Built-in presets:
 | Preset | What it installs | Defaults |
 |---|---|---|
 | `claude-code` | `@anthropic-ai/claude-code` via npm | 2GB RAM, 30min timeout |
+| `codex` | `@openai/codex` via npm | 2GB RAM, 30min timeout |
 | `python-data-science` | numpy, pandas, matplotlib, scikit-learn | 2GB RAM |
 | `python-ml` | torch, transformers, datasets, accelerate | 2 vCPU, 4GB RAM, 30min timeout |
 | `node` | Verifies node/npm are present | defaults |
@@ -213,7 +232,7 @@ sb2 = Sandbox("tensorlake", snapshot_id=snap.snapshot_id)
 | Docker | Yes (`container.commit()`) |
 | Tensorlake | Yes (filesystem + memory) |
 | Modal | Yes (filesystem) |
-| Daytona, E2B, Local, Ray | No |
+| Daytona, E2B, Local, Ray, Safehouse | No |
 
 ### Lifecycle
 
@@ -234,21 +253,21 @@ sb.backend_name   # "docker"
 
 ## Feature Support Matrix
 
-| Feature | Local | Docker | Ray | Daytona | Tensorlake | Modal | E2B |
-|---|---|---|---|---|---|---|---|
-| `execute_code` | Any binary | Any binary | Any binary | Python, TS, JS, Ruby, Go | Any binary | Any binary | Python |
-| `execute_command` | Shell | Shell | Shell | Shell | Shell | Shell | Shell |
-| `list_files` | Native | `find` / `ls` | Native | Native SDK | via `ls` | Native SDK | Native SDK |
-| `read_file` | Native | `get_archive` | Native | Native SDK | via `cat` | Native SDK | Native SDK |
-| `write_file` | Native | `put_archive` | Native | Native SDK | via base64 | Native SDK | Native SDK |
-| `upload_file` | `shutil.copy` | `put_archive` | `ray.put` | Native SDK | via base64 | Native SDK | Native SDK |
-| `download_file` | `shutil.copy` | `get_archive` | `ray.get` | Native SDK | via base64 | Native SDK | Native SDK |
-| `snapshot` | No | Yes | No | No | Yes | Yes | No |
-| Resource limits | No | cpu, memory | cpu (Ray) | Defaults | cpu, memory | cpu, memory, gpu | Tier-based |
-| Network control | No | Yes | No | Firewall, VPN | Yes | Tunnels | No |
-| Isolation | Process-level | Container | Process | Full VM | Container | Container | Full VM |
-| GPU | No | No | Via Ray | No | No | Yes | No |
-| Needs install | Nothing | Docker daemon | `ray` | API key | `tl login` | API key | API key |
+| Feature | Local | Safehouse | Docker | Ray | Daytona | Tensorlake | Modal | E2B |
+|---|---|---|---|---|---|---|---|---|
+| `execute_code` | Any binary | Any binary | Any binary | Any binary | Python, TS, JS, Ruby, Go | Any binary | Any binary | Python |
+| `execute_command` | Shell | Shell | Shell | Shell | Shell | Shell | Shell | Shell |
+| `list_files` | Native | Native | `find` / `ls` | Native | Native SDK | via `ls` | Native SDK | Native SDK |
+| `read_file` | Native | Native | `get_archive` | Native | Native SDK | via `cat` | Native SDK | Native SDK |
+| `write_file` | Native | Native | `put_archive` | Native | Native SDK | via base64 | Native SDK | Native SDK |
+| `upload_file` | `shutil.copy` | `shutil.copy` | `put_archive` | `ray.put` | Native SDK | via base64 | Native SDK | Native SDK |
+| `download_file` | `shutil.copy` | `shutil.copy` | `get_archive` | `ray.get` | Native SDK | via base64 | Native SDK | Native SDK |
+| `snapshot` | No | No | Yes | No | No | Yes | Yes | No |
+| Resource limits | No | No | cpu, memory | cpu (Ray) | Defaults | cpu, memory | cpu, memory, gpu | Tier-based |
+| Network control | No | No | Yes | No | Firewall, VPN | Yes | Tunnels | No |
+| Isolation | Process-level | macOS `sandbox-exec` | Container | Process | Full VM | Container | Container | Full VM |
+| GPU | No | No | No | Via Ray | No | No | Yes | No |
+| Needs install | Nothing | `safehouse` CLI | Docker daemon | `ray` | API key | `tl login` | API key | API key |
 
 ## Exceptions
 

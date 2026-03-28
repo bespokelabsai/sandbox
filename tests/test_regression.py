@@ -16,6 +16,9 @@ any environment — it will exercise whatever backends are available.
 from __future__ import annotations
 
 import os
+import platform
+import shutil
+import subprocess
 import unittest
 
 from bespokelabs.sandbox import Sandbox
@@ -69,6 +72,24 @@ def _can_use_docker() -> bool:
         client = docker.from_env()
         client.ping()
         return True
+    except Exception:
+        return False
+
+
+def _can_use_safehouse() -> bool:
+    if platform.system() != "Darwin":
+        return False
+    safehouse = shutil.which("safehouse")
+    if not safehouse:
+        return False
+    try:
+        result = subprocess.run(
+            [safehouse, "--", "/usr/bin/true"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.returncode == 0
     except Exception:
         return False
 
@@ -203,6 +224,11 @@ class ModalRegressionTests(_RegressionMixin, unittest.TestCase):
 @unittest.skipUnless(_can_use_docker(), "Docker not available")
 class DockerRegressionTests(_RegressionMixin, unittest.TestCase):
     backend_name = "docker"
+
+
+@unittest.skipUnless(_can_use_safehouse(), "Safehouse CLI not available or unusable in this environment")
+class SafehouseRegressionTests(_RegressionMixin, unittest.TestCase):
+    backend_name = "safehouse"
 
 
 class LocalRegressionTests(_RegressionMixin, unittest.TestCase):

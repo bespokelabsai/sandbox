@@ -13,10 +13,11 @@ from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, Sn
 
 
 class Sandbox:
-    """Unified sandbox interface across Daytona, Tensorlake, Modal, and E2B.
+    """Unified sandbox interface across Local, Safehouse, Docker, Ray, Daytona,
+    Tensorlake, Modal, and E2B.
 
     Usage:
-        with Sandbox("e2b", timeout_secs=300) as sb:
+        with Sandbox("safehouse", timeout_secs=300) as sb:
             result = sb.execute_code('print("hello")')
             print(result.stdout)
 

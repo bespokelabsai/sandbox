@@ -1,12 +1,13 @@
 """bespokelabs-sandbox - OpenRouter for Sandboxes.
 
 Unified Python API for cloud sandbox providers.
-Supports Daytona, Tensorlake, Modal, and E2B as interchangeable backends.
+Supports Local, Safehouse, Docker, Ray, Daytona, Tensorlake, Modal, and E2B
+as interchangeable backends.
 
 Usage:
     from bespokelabs.sandbox import Sandbox
 
-    with Sandbox("daytona") as sb:
+    with Sandbox("safehouse") as sb:
         result = sb.execute_code('print("hello")')
         print(result.stdout)
 """
