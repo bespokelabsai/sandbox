@@ -18,7 +18,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from bespokelabs.sandbox import Sandbox, SandboxExecutionError
+from bespokelabs.sandbox import Sandbox, SandboxExecutionError, json_schema
 
 PRICING_JSON = Path(__file__).resolve().parent.parent / "src" / "bespokelabs" / "sandbox" / "pricing.json"
 WORKDIR = os.path.join(os.path.dirname(__file__), ".sandbox_workdir")
@@ -64,22 +64,19 @@ PROMPT_TEMPLATE = """Find the exact, current pricing for {name} ({description}).
 Check their pricing page at {url} and any other relevant docs or blog posts.
 I need the actual dollar amounts — not just tier names.
 
-Return ONLY a JSON object with these fields:
-  vcpu_per_hour_usd, ram_gib_per_hour_usd, storage_gib_per_month_usd,
-  per_execution_usd, free_tier (string or null), pricing_url, notes.
+{schema}
 
 Rules:
 - Use 0.0 if a dimension is not charged separately (e.g. RAM included in vCPU price).
 - Use the base/default tier price, not enterprise pricing.
 - If you cannot find an exact number, use your best estimate and note it in "notes".
-- Return ONLY the JSON object, nothing else.
 """
 
 
 def fetch_provider_pricing(sb, provider_key: str) -> ProviderPricing | None:
     """Ask Claude Code inside the sandbox to look up pricing for one provider."""
     provider = CLOUD_PROVIDERS[provider_key]
-    prompt = PROMPT_TEMPLATE.format(**provider)
+    prompt = PROMPT_TEMPLATE.format(**provider, schema=json_schema(ProviderPricing))
 
     try:
         return sb.execute_command(
@@ -117,7 +114,7 @@ def main() -> None:
         pricing = json.load(f)
 
     print(f"Fetching pricing for: {', '.join(providers)}")
-    print(f"Using sandbox with Claude Code preset...\n")
+    print("Using sandbox with Claude Code preset...\n")
 
     with Sandbox("local", preset="claude-code", env_vars={"ANTHROPIC_API_KEY": api_key}, workdir=WORKDIR) as sb:
         if args.model:

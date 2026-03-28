@@ -17,7 +17,7 @@ import dataclasses
 import os
 import sys
 
-from bespokelabs.sandbox import Sandbox, SandboxExecutionError
+from bespokelabs.sandbox import Sandbox, SandboxExecutionError, json_schema
 
 WORKDIR = os.path.join(os.path.dirname(__file__), ".sandbox_workdir")
 
@@ -40,11 +40,7 @@ def main() -> None:
     if not api_key:
         sys.exit("Set OPENAI_API_KEY before running this example.")
 
-    prompt = (
-        f"Look up the GitHub repository {args.repo}. "
-        f"Return ONLY a JSON object with these fields: "
-        f"stars (int), forks (int), open_issues (int), language (string), description (string)."
-    )
+    prompt = f"Look up the GitHub repository {args.repo}. {json_schema(RepoStats)}"
 
     print(f"Fetching stats for {args.repo} using Codex...\n")
 

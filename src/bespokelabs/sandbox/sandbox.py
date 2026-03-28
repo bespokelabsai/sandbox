@@ -3,6 +3,8 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
+import types
+import typing
 from typing import TypeVar, overload
 
 from bespokelabs.sandbox.backends import BACKENDS
@@ -305,3 +307,63 @@ def _parse_result(result: SandboxResult, return_type: type[T]) -> T:
 
     # Fallback — plain class with **kwargs init
     return return_type(**data)
+
+
+# -- Schema generation ---------------------------------------------------------
+
+_TYPE_NAMES: dict[type, str] = {
+    int: "int",
+    float: "float",
+    str: "string",
+    bool: "boolean",
+}
+
+
+def _friendly_type(tp: object) -> str:
+    """Human-readable name for a type annotation."""
+    if tp in _TYPE_NAMES:
+        return _TYPE_NAMES[tp]
+
+    origin = getattr(tp, "__origin__", None)
+
+    # Optional[X] / X | None  (typing.Union or Python 3.10+ types.UnionType)
+    if origin is typing.Union or isinstance(tp, types.UnionType):
+        args = [a for a in tp.__args__ if a is not type(None)]
+        if len(args) == 1:
+            return f"{_friendly_type(args[0])} or null"
+        return " | ".join(_friendly_type(a) for a in args)
+
+    # list[X]
+    if origin is list:
+        inner = tp.__args__[0] if tp.__args__ else "any"
+        return f"array of {_friendly_type(inner)}"
+
+    return str(tp)
+
+
+def json_schema(cls: type) -> str:
+    """Generate a prompt instruction describing the expected JSON fields.
+
+    Works with dataclasses and Pydantic v2 models.  Append the result to
+    your prompt so the LLM knows what structure to return::
+
+        prompt = f"Look up {repo}. {json_schema(RepoStats)}"
+    """
+    # Pydantic v2
+    if hasattr(cls, "model_json_schema"):
+        schema = cls.model_json_schema()
+        return f"Return ONLY a JSON object matching this schema:\n{json.dumps(schema, indent=2)}"
+
+    # Dataclass
+    if dataclasses.is_dataclass(cls):
+        try:
+            hints = typing.get_type_hints(cls)
+        except Exception:
+            hints = {}
+        parts = []
+        for f in dataclasses.fields(cls):
+            tp = hints.get(f.name, f.type)
+            parts.append(f"{f.name} ({_friendly_type(tp)})")
+        return "Return ONLY a JSON object with these fields: " + ", ".join(parts) + "."
+
+    return "Return ONLY a JSON object."

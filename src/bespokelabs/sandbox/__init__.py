@@ -20,7 +20,7 @@ from bespokelabs.sandbox.exceptions import (
     SandboxExecutionError,
 )
 from bespokelabs.sandbox.presets import SandboxPreset
-from bespokelabs.sandbox.sandbox import Sandbox
+from bespokelabs.sandbox.sandbox import Sandbox, json_schema
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
 
 __all__ = [
@@ -35,4 +35,5 @@ __all__ = [
     "SandboxExecutionError",
     "BackendNotInstalledError",
     "FeatureNotSupportedError",
+    "json_schema",
 ]
