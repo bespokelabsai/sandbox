@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-import dataclasses
 import unittest
 
-from bespokelabs.sandbox import Sandbox, SandboxExecutionError
+from pydantic import BaseModel
+
+from bespokelabs.sandbox import Sandbox, SandboxExecutionError, json_schema
 
 
-@dataclasses.dataclass
-class Stats:
+class Stats(BaseModel):
     mean: float
     count: int
 
 
-@dataclasses.dataclass
-class Greeting:
+class Greeting(BaseModel):
     message: str
     extra: str = ""
 
@@ -29,7 +28,7 @@ class TestReturnTypeExecuteCode(unittest.TestCase):
     def tearDown(self):
         self.sb.destroy()
 
-    def test_basic_dataclass(self):
+    def test_basic_model(self):
         code = 'import json; print(json.dumps({"mean": 3.14, "count": 42}))'
         result = self.sb.execute_code(code, return_type=Stats)
         self.assertIsInstance(result, Stats)
@@ -37,7 +36,7 @@ class TestReturnTypeExecuteCode(unittest.TestCase):
         self.assertEqual(result.count, 42)
 
     def test_extra_fields_ignored(self):
-        """Extra JSON keys not in the dataclass should be silently dropped."""
+        """Extra JSON keys not in the model should be silently dropped."""
         code = 'import json; print(json.dumps({"mean": 1.0, "count": 2, "extra_key": "ignored"}))'
         result = self.sb.execute_code(code, return_type=Stats)
         self.assertIsInstance(result, Stats)
@@ -65,9 +64,24 @@ class TestReturnTypeExecuteCode(unittest.TestCase):
         with self.assertRaises(SandboxExecutionError):
             self.sb.execute_code(code, return_type=Stats)
 
+    def test_missing_required_field_raises(self):
+        """Missing a required field should raise SandboxExecutionError, not ValidationError."""
+        code = 'import json; print(json.dumps({"mean": 3.14}))'  # missing 'count'
+        with self.assertRaises(SandboxExecutionError):
+            self.sb.execute_code(code, return_type=Stats)
+
+    def test_wrong_type_raises(self):
+        """Wrong field type should raise SandboxExecutionError."""
+        code = 'import json; print(json.dumps({"mean": "not_a_number", "count": 42}))'
+        # Pydantic coerces strings to floats when possible, so use something truly invalid
+        code = 'import json; print(json.dumps({"mean": "abc", "count": 42}))'
+        with self.assertRaises(SandboxExecutionError):
+            self.sb.execute_code(code, return_type=Stats)
+
     def test_without_return_type_unchanged(self):
         """Without return_type, normal SandboxResult is returned."""
         from bespokelabs.sandbox.types import SandboxResult
+
         code = 'print("hello")'
         result = self.sb.execute_code(code)
         self.assertIsInstance(result, SandboxResult)
@@ -84,10 +98,31 @@ class TestReturnTypeExecuteCommand(unittest.TestCase):
 
     def test_command_with_return_type(self):
         result = self.sb.execute_command(
-            "echo", args=['{"message": "from_cmd"}'], return_type=Greeting,
+            "echo",
+            args=['{"message": "from_cmd"}'],
+            return_type=Greeting,
         )
         self.assertIsInstance(result, Greeting)
         self.assertEqual(result.message, "from_cmd")
+
+
+class TestJsonSchema(unittest.TestCase):
+    """Test json_schema() helper."""
+
+    def test_pydantic_model_schema(self):
+        schema = json_schema(Stats)
+        self.assertIn("Return ONLY a JSON object matching this schema:", schema)
+        self.assertIn('"mean"', schema)
+        self.assertIn('"count"', schema)
+
+    def test_pydantic_optional_field(self):
+        class WithOptional(BaseModel):
+            name: str
+            value: int | None = None
+
+        schema = json_schema(WithOptional)
+        self.assertIn('"name"', schema)
+        self.assertIn('"value"', schema)
 
 
 if __name__ == "__main__":

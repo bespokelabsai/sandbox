@@ -2,7 +2,7 @@
 
 Demonstrates the return_type feature: Codex searches the web for repo
 stats and returns structured JSON that is automatically parsed into a
-dataclass.
+Pydantic model.
 
 Prerequisites:
     - OPENAI_API_KEY set in your environment
@@ -13,17 +13,17 @@ Usage:
 """
 
 import argparse
-import dataclasses
 import os
 import sys
+
+from pydantic import BaseModel
 
 from bespokelabs.sandbox import Sandbox, SandboxExecutionError, json_schema
 
 WORKDIR = os.path.join(os.path.dirname(__file__), ".sandbox_workdir")
 
 
-@dataclasses.dataclass
-class RepoStats:
+class RepoStats(BaseModel):
     stars: int = 0
     forks: int = 0
     open_issues: int = 0
