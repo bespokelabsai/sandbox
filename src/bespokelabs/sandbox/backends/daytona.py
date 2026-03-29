@@ -50,13 +50,26 @@ class DaytonaAdapter:
     def _build_params(config: SandboxConfig) -> object | None:
         """Build the appropriate Daytona params object for the config."""
         from daytona import CreateSandboxFromImageParams, CreateSandboxFromSnapshotParams  # type: ignore[import-untyped]
+        from daytona.common.sandbox import Resources  # type: ignore[import-untyped]
 
         common: dict = {}
         if config.env_vars:
             common["env_vars"] = config.env_vars
 
         if config.image:
-            return CreateSandboxFromImageParams(image=config.image, **common)
+            # Build resources if non-default cpu or memory is specified
+            resources_kwargs: dict = {}
+            if config.cpu != 1.0:
+                resources_kwargs["cpu"] = int(config.cpu)
+            if config.memory_mb != 1024:
+                # Daytona SDK expects memory in GiB
+                resources_kwargs["memory"] = max(1, config.memory_mb // 1024)
+            if config.disk_mb is not None:
+                # Daytona SDK expects disk in GiB
+                resources_kwargs["disk"] = max(1, config.disk_mb // 1024)
+
+            resources = Resources(**resources_kwargs) if resources_kwargs else None
+            return CreateSandboxFromImageParams(image=config.image, resources=resources, **common)
 
         if config.snapshot_id:
             return CreateSandboxFromSnapshotParams(snapshot=config.snapshot_id, **common)
