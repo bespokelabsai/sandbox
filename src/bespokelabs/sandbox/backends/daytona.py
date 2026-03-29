@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import pathlib
 import shlex
@@ -60,13 +61,13 @@ class DaytonaAdapter:
             # Build resources if non-default cpu or memory is specified
             resources_kwargs: dict = {}
             if config.cpu != 1.0:
-                resources_kwargs["cpu"] = int(config.cpu)
+                resources_kwargs["cpu"] = max(1, int(config.cpu))
             if config.memory_mb != 1024:
                 # Daytona SDK expects memory in GiB
-                resources_kwargs["memory"] = max(1, config.memory_mb // 1024)
+                resources_kwargs["memory"] = math.ceil(config.memory_mb / 1024)
             if config.disk_mb is not None:
                 # Daytona SDK expects disk in GiB
-                resources_kwargs["disk"] = max(1, config.disk_mb // 1024)
+                resources_kwargs["disk"] = math.ceil(config.disk_mb / 1024)
 
             resources = Resources(**resources_kwargs) if resources_kwargs else None
             return CreateSandboxFromImageParams(image=config.image, resources=resources, **common)
