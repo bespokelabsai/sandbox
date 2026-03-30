@@ -105,6 +105,18 @@ class TestReturnTypeExecuteCommand(unittest.TestCase):
         self.assertIsInstance(result, Greeting)
         self.assertEqual(result.message, "from_cmd")
 
+    def test_command_inject_schema(self):
+        """With inject_schema=True, schema is appended to last arg.
+        The JSON extractor should still find the original JSON object."""
+        result = self.sb.execute_command(
+            "echo",
+            args=['{"message": "injected"}'],
+            return_type=Greeting,
+            inject_schema=True,
+        )
+        self.assertIsInstance(result, Greeting)
+        self.assertEqual(result.message, "injected")
+
 
 class TestJsonSchema(unittest.TestCase):
     """Test json_schema() helper."""
