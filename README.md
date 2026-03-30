@@ -113,8 +113,8 @@ sb = Sandbox(
     backend,              # "local" | "safehouse" | "docker" | "ray" | "daytona" | "tensorlake" | "modal" | "e2b"
     *,
     preset=None,          # Preset name or SandboxPreset object
-    cpu=1.0,              # vCPUs (Tensorlake, Modal, Docker)
-    memory_mb=1024,       # RAM in MB (Tensorlake, Modal, Docker)
+    cpu=1.0,              # vCPUs (Tensorlake, Modal, Docker, Daytona)
+    memory_mb=1024,       # RAM in MB (Tensorlake, Modal, Docker, Daytona)
     disk_mb=None,         # Disk in MB (Daytona)
     timeout_secs=600,     # Max lifetime / subprocess timeout
     image=None,           # Container image (Docker, Modal, Daytona)
@@ -263,7 +263,7 @@ sb.backend_name   # "docker"
 | `upload_file` | `shutil.copy` | `shutil.copy` | `put_archive` | `ray.put` | Native SDK | via base64 | Native SDK | Native SDK |
 | `download_file` | `shutil.copy` | `shutil.copy` | `get_archive` | `ray.get` | Native SDK | via base64 | Native SDK | Native SDK |
 | `snapshot` | No | No | Yes | No | No | Yes | Yes | No |
-| Resource limits | No | No | cpu, memory | cpu (Ray) | Defaults | cpu, memory | cpu, memory, gpu | Tier-based |
+| Resource limits | No | No | cpu, memory | cpu (Ray) | cpu, memory, disk | cpu, memory | cpu, memory, gpu | Tier-based |
 | Network control | No | No | Yes | No | Firewall, VPN | Yes | Tunnels | No |
 | Isolation | Process-level | macOS `sandbox-exec` | Container | Process | Full VM | Container | Container | Full VM |
 | GPU | No | No | No | Via Ray | No | No | Yes | No |
