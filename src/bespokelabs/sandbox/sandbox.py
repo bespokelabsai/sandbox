@@ -368,7 +368,12 @@ def json_schema(cls: type) -> str:
             hints = typing.get_type_hints(cls)
         except Exception:
             hints = {}
-        parts = [f"{f.name}: {hints.get(f.name, f.type)}" for f in dataclasses.fields(cls)]
+        parts = []
+        for f in dataclasses.fields(cls):
+            tp = hints.get(f.name, f.type)
+            # get_type_hints returns actual type objects; use __name__ for clean output
+            name = getattr(tp, "__name__", str(tp))
+            parts.append(f"{f.name} ({name})")
         return "Return ONLY a JSON object with these fields: " + ", ".join(parts) + "."
 
     return "Return ONLY a JSON object."
