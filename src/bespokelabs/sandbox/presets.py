@@ -62,6 +62,16 @@ register_preset(SandboxPreset(
 ))
 
 register_preset(SandboxPreset(
+    name="claude-sdk",
+    description="Sandbox with Claude Agent SDK and bundled Claude Code CLI",
+    setup_commands=[
+        "pip install claude-agent-sdk",
+    ],
+    memory_mb=2048,
+    timeout_secs=1800,
+))
+
+register_preset(SandboxPreset(
     name="codex",
     description="Sandbox with Codex CLI installed",
     setup_commands=[

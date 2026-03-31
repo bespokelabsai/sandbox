@@ -3,7 +3,6 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
-import types
 import typing
 from typing import TypeVar, overload
 
@@ -132,21 +131,37 @@ class Sandbox:
     def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult: ...
 
     @overload
-    def execute_command(self, command: str, args: list[str] | None = None, *, return_type: type[T]) -> T: ...
+    def execute_command(self, command: str, args: list[str] | None = None, *, return_type: type[T], inject_schema: bool = ...) -> T: ...
 
-    def execute_command(self, command: str, args: list[str] | None = None, *, return_type: type[T] | None = None) -> SandboxResult | T:
+    def execute_command(self, command: str, args: list[str] | None = None, *, return_type: type[T] | None = None, inject_schema: bool = False) -> SandboxResult | T:
         """Execute a shell command and return stdout/stderr/exit_code.
 
-        If *return_type* is given, parse stdout as JSON and return an
-        instance of that type instead of SandboxResult.  Works with
-        dataclasses, Pydantic models, and any class whose ``__init__``
-        accepts ``**kwargs``.
+        If *return_type* is given, stdout is parsed into an instance of
+        that type.  Set ``inject_schema=True`` to automatically append
+        the JSON schema to the last argument (useful when the last arg
+        is an LLM prompt).
         """
         self._check_alive()
+        if return_type is not None and inject_schema and args:
+            args = list(args)
+            args[-1] = args[-1] + " " + json_schema(return_type)
         result = self._adapter.execute_command(command, args)
         if return_type is not None:
             return _parse_result(result, return_type)
         return result
+
+    @staticmethod
+    def parse_as(text: str, return_type: type[T]) -> T:
+        """Parse a string (e.g. file contents) as JSON into *return_type*.
+
+        Useful when a tool writes output to a file rather than stdout::
+
+            sb.execute_command("codex", args=["exec", ..., "-o", "/tmp/out.txt"])
+            raw = sb.read_file("/tmp/out.txt").decode()
+            stats = Sandbox.parse_as(raw, RepoStats)
+        """
+        result = SandboxResult(stdout=text, stderr="", exit_code=0)
+        return _parse_result(result, return_type)
 
     # -- File operations ---------------------------------------------------
 
@@ -241,21 +256,23 @@ class Sandbox:
 _FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?\s*```", re.DOTALL)
 
 
-def _extract_json(text: str) -> dict:
-    """Best-effort extraction of a JSON object from *text*.
+def _extract_json_candidates(text: str) -> list[dict]:
+    """Extract all JSON dict candidates from *text*.
 
-    Tries, in order:
+    Returns a list of parsed dicts, trying in order:
     1. Direct ``json.loads`` on the stripped text.
-    2. Contents of the first markdown code fence.
-    3. Substring from the first ``{`` to the last ``}``.
+    2. Contents of markdown code fences.
+    3. All ``{...}`` substrings that parse as valid JSON dicts.
     """
     text = text.strip()
+    candidates: list[dict] = []
 
     # 1. Direct parse
     try:
         obj = json.loads(text)
         if isinstance(obj, dict):
-            return obj
+            candidates.append(obj)
+            return candidates
     except (json.JSONDecodeError, ValueError):
         pass
 
@@ -265,24 +282,41 @@ def _extract_json(text: str) -> dict:
         try:
             obj = json.loads(m.group(1))
             if isinstance(obj, dict):
-                return obj
+                candidates.append(obj)
+                return candidates
         except (json.JSONDecodeError, ValueError):
             pass
 
-    # 3. First { … last }
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end > start:
-        try:
-            obj = json.loads(text[start : end + 1])
-            if isinstance(obj, dict):
-                return obj
-        except (json.JSONDecodeError, ValueError):
-            pass
+    # 3. All {…} substrings
+    idx = 0
+    while True:
+        start = text.find("{", idx)
+        if start == -1:
+            break
+        end = text.rfind("}")
+        while end > start:
+            try:
+                obj = json.loads(text[start : end + 1])
+                if isinstance(obj, dict):
+                    candidates.append(obj)
+                    break
+            except (json.JSONDecodeError, ValueError):
+                pass
+            end = text.rfind("}", start, end)
+        idx = start + 1
 
-    raise SandboxExecutionError(
-        f"Could not extract JSON object from stdout:\n{text[:500]}"
-    )
+    return candidates
+
+
+def _try_construct(data: dict, return_type: type[T]) -> T:
+    """Attempt to construct *return_type* from *data*. Raises on failure."""
+    if hasattr(return_type, "model_validate"):
+        return return_type.model_validate(data)
+    if dataclasses.is_dataclass(return_type):
+        field_names = {f.name for f in dataclasses.fields(return_type)}
+        filtered = {k: v for k, v in data.items() if k in field_names}
+        return return_type(**filtered)
+    return return_type(**data)
 
 
 def _parse_result(result: SandboxResult, return_type: type[T]) -> T:
@@ -293,64 +327,33 @@ def _parse_result(result: SandboxResult, return_type: type[T]) -> T:
             f"stderr: {result.stderr[:500]}"
         )
 
-    data = _extract_json(result.stdout)
-
-    try:
-        # Pydantic v2
-        if hasattr(return_type, "model_validate"):
-            return return_type.model_validate(data)
-
-        # Dataclass — only pass fields the dataclass declares
-        if dataclasses.is_dataclass(return_type):
-            field_names = {f.name for f in dataclasses.fields(return_type)}
-            filtered = {k: v for k, v in data.items() if k in field_names}
-            return return_type(**filtered)
-
-        # Fallback — plain class with **kwargs init
-        return return_type(**data)
-    except Exception as exc:
+    candidates = _extract_json_candidates(result.stdout)
+    if not candidates:
         raise SandboxExecutionError(
-            f"Failed to construct {return_type.__name__} from parsed JSON: {exc}"
-        ) from exc
+            f"Could not extract JSON object from stdout:\n{result.stdout[:500]}"
+        )
+
+    # Try each candidate — return the first that validates against return_type
+    last_error = None
+    for data in candidates:
+        try:
+            return _try_construct(data, return_type)
+        except Exception as exc:
+            last_error = exc
+
+    raise SandboxExecutionError(
+        f"Failed to construct {return_type.__name__} from parsed JSON: {last_error}"
+    ) from last_error
 
 
 # -- Schema generation ---------------------------------------------------------
 
-_TYPE_NAMES: dict[type, str] = {
-    int: "int",
-    float: "float",
-    str: "string",
-    bool: "boolean",
-}
-
-
-def _friendly_type(tp: object) -> str:
-    """Human-readable name for a type annotation."""
-    if tp in _TYPE_NAMES:
-        return _TYPE_NAMES[tp]
-
-    origin = getattr(tp, "__origin__", None)
-
-    # Optional[X] / X | None  (typing.Union or Python 3.10+ types.UnionType)
-    if origin is typing.Union or isinstance(tp, types.UnionType):
-        args = [a for a in tp.__args__ if a is not type(None)]
-        if len(args) == 1:
-            return f"{_friendly_type(args[0])} or null"
-        return " | ".join(_friendly_type(a) for a in args)
-
-    # list[X]
-    if origin is list:
-        inner = tp.__args__[0] if tp.__args__ else "any"
-        return f"array of {_friendly_type(inner)}"
-
-    return str(tp)
-
 
 def json_schema(cls: type) -> str:
-    """Generate a prompt instruction describing the expected JSON fields.
+    """Generate a prompt instruction describing the expected JSON schema.
 
-    Works with dataclasses and Pydantic v2 models.  Append the result to
-    your prompt so the LLM knows what structure to return::
+    Works with Pydantic v2 models (recommended) and dataclasses.
+    Append the result to your prompt so the LLM knows what to return::
 
         prompt = f"Look up {repo}. {json_schema(RepoStats)}"
     """
@@ -359,7 +362,7 @@ def json_schema(cls: type) -> str:
         schema = cls.model_json_schema()
         return f"Return ONLY a JSON object matching this schema:\n{json.dumps(schema, indent=2)}"
 
-    # Dataclass
+    # Dataclass fallback
     if dataclasses.is_dataclass(cls):
         try:
             hints = typing.get_type_hints(cls)
@@ -368,7 +371,9 @@ def json_schema(cls: type) -> str:
         parts = []
         for f in dataclasses.fields(cls):
             tp = hints.get(f.name, f.type)
-            parts.append(f"{f.name} ({_friendly_type(tp)})")
+            # get_type_hints returns actual type objects; use __name__ for clean output
+            name = getattr(tp, "__name__", str(tp))
+            parts.append(f"{f.name} ({name})")
         return "Return ONLY a JSON object with these fields: " + ", ".join(parts) + "."
 
     return "Return ONLY a JSON object."

@@ -11,12 +11,13 @@ Usage:
 """
 
 import argparse
-import dataclasses
 import json
 import os
 import sys
 from datetime import date
 from pathlib import Path
+
+from pydantic import BaseModel
 
 from bespokelabs.sandbox import Sandbox, SandboxExecutionError, json_schema
 
@@ -48,8 +49,8 @@ CLOUD_PROVIDERS = {
     },
 }
 
-@dataclasses.dataclass
-class ProviderPricing:
+
+class ProviderPricing(BaseModel):
     vcpu_per_hour_usd: float = 0.0
     ram_gib_per_hour_usd: float = 0.0
     storage_gib_per_month_usd: float = 0.0
@@ -121,7 +122,6 @@ def main() -> None:
         env_vars["CLAUDE_MODEL"] = args.model
 
     with Sandbox("local", preset="claude-code", env_vars=env_vars, workdir=WORKDIR) as sb:
-
         for provider_key in providers:
             print(f"  Fetching {provider_key}...")
             result = fetch_provider_pricing(sb, provider_key)
@@ -129,7 +129,7 @@ def main() -> None:
                 print(f"  SKIPPED {provider_key} (fetch failed)\n")
                 continue
 
-            pricing["backends"][provider_key] = dataclasses.asdict(result)
+            pricing["backends"][provider_key] = result.model_dump()
             print(f"  OK: {provider_key} -> ${result.vcpu_per_hour_usd}/vCPU-hr\n")
 
     pricing["last_updated"] = date.today().isoformat()

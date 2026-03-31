@@ -2,7 +2,7 @@
 
 Demonstrates the return_type feature: Codex searches the web for repo
 stats and returns structured JSON that is automatically parsed into a
-dataclass.
+Pydantic model.
 
 Prerequisites:
     - OPENAI_API_KEY set in your environment
@@ -13,17 +13,18 @@ Usage:
 """
 
 import argparse
-import dataclasses
 import os
 import sys
+
+from pydantic import BaseModel
 
 from bespokelabs.sandbox import Sandbox, SandboxExecutionError, json_schema
 
 WORKDIR = os.path.join(os.path.dirname(__file__), ".sandbox_workdir")
+OUTPUT_FILE = "/tmp/codex_output.txt"
 
 
-@dataclasses.dataclass
-class RepoStats:
+class RepoStats(BaseModel):
     stars: int = 0
     forks: int = 0
     open_issues: int = 0
@@ -46,10 +47,16 @@ def main() -> None:
 
     with Sandbox("local", preset="codex", env_vars={"OPENAI_API_KEY": api_key}, workdir=WORKDIR) as sb:
         try:
-            stats = sb.execute_command(
-                "codex", args=["-q", prompt],
-                return_type=RepoStats,
-            )
+            result = sb.execute_command("codex", args=[
+                "exec", "--full-auto", "--skip-git-repo-check", "--search",
+                "-o", OUTPUT_FILE,
+                prompt,
+            ])
+            if result.exit_code != 0:
+                sys.exit(f"Codex failed (exit {result.exit_code}):\n{result.stderr[:500]}")
+
+            raw = sb.read_file(OUTPUT_FILE).decode()
+            stats = Sandbox.parse_as(raw, RepoStats)
         except SandboxExecutionError as e:
             sys.exit(f"Failed: {e}")
 
