@@ -4,3 +4,4 @@ __pycache__/
 dist/
 examples/.sandbox_workdir/
 examples/__pycache__/
+.claude/

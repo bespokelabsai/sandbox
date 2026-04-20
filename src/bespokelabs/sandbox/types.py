@@ -10,7 +10,8 @@ class SandboxConfig:
     Not all backends honour every field:
       - cpu / memory_mb: Daytona, Tensorlake, Modal, Docker
       - disk_mb: Daytona only (image-based sandboxes)
-      - image: Modal, Daytona (OCI image), Docker (e.g. "python:3.12-slim")
+      - image: Modal, Daytona (OCI image), Docker (e.g. "python:3.12-slim"),
+               Tensorlake (project-scoped image name, e.g. "tensorlake/ubuntu-minimal")
       - template: E2B only
       - app_name: Modal only
       - allow_internet: Tensorlake, Daytona, Docker

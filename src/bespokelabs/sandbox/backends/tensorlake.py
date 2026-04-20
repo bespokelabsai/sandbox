@@ -33,6 +33,8 @@ class TensorlakeAdapter:
                 "timeout_secs": config.timeout_secs,
                 "allow_internet_access": config.allow_internet,
             }
+            if config.image:
+                kwargs["image"] = config.image
             if config.snapshot_id:
                 kwargs["snapshot_id"] = config.snapshot_id
             self._sandbox = self._client.create_and_connect(**kwargs)
