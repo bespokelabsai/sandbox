@@ -1,5 +1,17 @@
 name: Build and push preset images
 
+# Two modes of operation:
+#
+#   * Push to main  -> build+push :main (mutable dev tag). Library code
+#     never references :main; it exists for manual testing.
+#
+#   * workflow_dispatch -> build+push a pinned, immutable tag (e.g. :v1)
+#     matching PRESET_IMAGE_TAG in src/bespokelabs/sandbox/presets.py.
+#     This is how you cut a new image release: bump the constant in
+#     Python, then run this workflow with the same tag value.
+#
+# :sha-<short> is always emitted for audit/rollback.
+
 on:
   push:
     branches: [main]
@@ -11,6 +23,10 @@ on:
         description: "Specific image to build (e.g. claude-sdk), or 'all'"
         required: false
         default: "all"
+      tag:
+        description: "Pinned tag to publish (e.g. v1). Must match PRESET_IMAGE_TAG."
+        required: true
+        default: "v1"
 
 env:
   REGISTRY: ghcr.io
@@ -72,10 +88,13 @@ jobs:
         id: meta
         with:
           images: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
+          # On workflow_dispatch -> the pinned tag input (e.g. :v1).
+          # On push to main     -> :main (dev tag, never referenced by library).
+          # Always emit :sha-<short> for auditability.
           tags: |
-            type=raw,value=latest
-            type=sha,prefix=
-            type=raw,value={{date 'YYYYMMDD'}}
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=raw,value=main,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-
 
       - uses: docker/build-push-action@v5
         with:

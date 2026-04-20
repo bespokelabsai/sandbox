@@ -62,12 +62,17 @@ def get_preset(name: str) -> SandboxPreset:
 
 IMAGE_REGISTRY = "ghcr.io/bespokelabsai/sandbox"
 
+# Pinned tag for preset images. Bump to cut a new immutable image set,
+# then run the build-images workflow_dispatch with the same tag value.
+# Never use ":latest" here — it's not reproducible.
+PRESET_IMAGE_TAG = "v1"
+
 # -- Built-in presets ------------------------------------------------------
 
 register_preset(SandboxPreset(
     name="claude-code",
     description="Sandbox with Claude Code (Anthropic CLI) installed",
-    image=f"{IMAGE_REGISTRY}/claude-code:latest",
+    image=f"{IMAGE_REGISTRY}/claude-code:{PRESET_IMAGE_TAG}",
     setup_commands=[
         "npm install -g @anthropic-ai/claude-code",
     ],
@@ -78,7 +83,7 @@ register_preset(SandboxPreset(
 register_preset(SandboxPreset(
     name="claude-sdk",
     description="Sandbox with Claude Agent SDK and bundled Claude Code CLI",
-    image=f"{IMAGE_REGISTRY}/claude-sdk:latest",
+    image=f"{IMAGE_REGISTRY}/claude-sdk:{PRESET_IMAGE_TAG}",
     setup_commands=[
         "pip install claude-agent-sdk",
     ],
@@ -89,7 +94,7 @@ register_preset(SandboxPreset(
 register_preset(SandboxPreset(
     name="codex",
     description="Sandbox with Codex CLI installed",
-    image=f"{IMAGE_REGISTRY}/codex:latest",
+    image=f"{IMAGE_REGISTRY}/codex:{PRESET_IMAGE_TAG}",
     setup_commands=[
         "npm install -g @openai/codex",
     ],
@@ -100,7 +105,7 @@ register_preset(SandboxPreset(
 register_preset(SandboxPreset(
     name="python-data-science",
     description="Python with numpy, pandas, matplotlib, scikit-learn",
-    image=f"{IMAGE_REGISTRY}/python-data-science:latest",
+    image=f"{IMAGE_REGISTRY}/python-data-science:{PRESET_IMAGE_TAG}",
     setup_commands=[
         "pip install numpy pandas matplotlib scikit-learn",
     ],
@@ -118,7 +123,7 @@ register_preset(SandboxPreset(
 register_preset(SandboxPreset(
     name="web-dev",
     description="Node.js with common web development tools",
-    image=f"{IMAGE_REGISTRY}/web-dev:latest",
+    image=f"{IMAGE_REGISTRY}/web-dev:{PRESET_IMAGE_TAG}",
     setup_commands=[
         "npm install -g typescript ts-node prettier eslint",
     ],
@@ -128,7 +133,7 @@ register_preset(SandboxPreset(
 register_preset(SandboxPreset(
     name="python-ml",
     description="Python with PyTorch and common ML libraries",
-    image=f"{IMAGE_REGISTRY}/python-ml:latest",
+    image=f"{IMAGE_REGISTRY}/python-ml:{PRESET_IMAGE_TAG}",
     setup_commands=[
         "pip install torch transformers datasets accelerate",
     ],
