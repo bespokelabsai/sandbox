@@ -10,6 +10,13 @@ class SandboxPreset:
     Attributes:
         name: Human-readable preset name.
         description: What this preset provides.
+        image: Pre-built OCI container image for docker/daytona/modal backends
+            (skips setup_commands if the backend supports images).
+        tensorlake_image: Tensorlake project-scoped image name. Tensorlake
+            doesn't accept arbitrary OCI URLs, so this is a separate field.
+            Users register a project image with `tl sbx image build` (our
+            Dockerfiles under images/ can be used as-is) and then set this.
+            When set, setup_commands are skipped on the Tensorlake backend.
         setup_commands: Shell commands run after sandbox creation (in order).
         cpu: Minimum recommended vCPUs.
         memory_mb: Minimum recommended RAM in MB.
@@ -20,6 +27,8 @@ class SandboxPreset:
 
     name: str
     description: str
+    image: str | None = None
+    tensorlake_image: str | None = None
     setup_commands: list[str] = field(default_factory=list)
     cpu: float = 1.0
     memory_mb: int = 1024
@@ -49,11 +58,21 @@ def get_preset(name: str) -> SandboxPreset:
     return PRESETS[name]
 
 
+# -- Constants -------------------------------------------------------------
+
+IMAGE_REGISTRY = "ghcr.io/bespokelabsai/sandbox"
+
+# Pinned tag for preset images. Bump to cut a new immutable image set,
+# then run the build-images workflow_dispatch with the same tag value.
+# Never use ":latest" here — it's not reproducible.
+PRESET_IMAGE_TAG = "v1"
+
 # -- Built-in presets ------------------------------------------------------
 
 register_preset(SandboxPreset(
     name="claude-code",
     description="Sandbox with Claude Code (Anthropic CLI) installed",
+    image=f"{IMAGE_REGISTRY}/claude-code:{PRESET_IMAGE_TAG}",
     setup_commands=[
         "npm install -g @anthropic-ai/claude-code",
     ],
@@ -64,6 +83,7 @@ register_preset(SandboxPreset(
 register_preset(SandboxPreset(
     name="claude-sdk",
     description="Sandbox with Claude Agent SDK and bundled Claude Code CLI",
+    image=f"{IMAGE_REGISTRY}/claude-sdk:{PRESET_IMAGE_TAG}",
     setup_commands=[
         "pip install claude-agent-sdk",
     ],
@@ -74,6 +94,7 @@ register_preset(SandboxPreset(
 register_preset(SandboxPreset(
     name="codex",
     description="Sandbox with Codex CLI installed",
+    image=f"{IMAGE_REGISTRY}/codex:{PRESET_IMAGE_TAG}",
     setup_commands=[
         "npm install -g @openai/codex",
     ],
@@ -84,6 +105,7 @@ register_preset(SandboxPreset(
 register_preset(SandboxPreset(
     name="python-data-science",
     description="Python with numpy, pandas, matplotlib, scikit-learn",
+    image=f"{IMAGE_REGISTRY}/python-data-science:{PRESET_IMAGE_TAG}",
     setup_commands=[
         "pip install numpy pandas matplotlib scikit-learn",
     ],
@@ -101,6 +123,7 @@ register_preset(SandboxPreset(
 register_preset(SandboxPreset(
     name="web-dev",
     description="Node.js with common web development tools",
+    image=f"{IMAGE_REGISTRY}/web-dev:{PRESET_IMAGE_TAG}",
     setup_commands=[
         "npm install -g typescript ts-node prettier eslint",
     ],
@@ -110,6 +133,7 @@ register_preset(SandboxPreset(
 register_preset(SandboxPreset(
     name="python-ml",
     description="Python with PyTorch and common ML libraries",
+    image=f"{IMAGE_REGISTRY}/python-ml:{PRESET_IMAGE_TAG}",
     setup_commands=[
         "pip install torch transformers datasets accelerate",
     ],

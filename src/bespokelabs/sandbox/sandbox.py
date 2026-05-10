@@ -69,6 +69,17 @@ class Sandbox:
         elif isinstance(preset, SandboxPreset):
             resolved_preset = preset
 
+        # Pick the preset image for this backend: tensorlake uses a
+        # project-scoped name (tensorlake_image), everything else uses
+        # the OCI `image` field.
+        preset_image_for_backend = None
+        if resolved_preset:
+            preset_image_for_backend = (
+                resolved_preset.tensorlake_image
+                if backend == "tensorlake"
+                else resolved_preset.image
+            )
+
         # Merge: explicit kwargs override preset defaults
         self._config = SandboxConfig(
             backend=backend,
@@ -76,7 +87,7 @@ class Sandbox:
             memory_mb=memory_mb if memory_mb is not None else (resolved_preset.memory_mb if resolved_preset else 1024),
             disk_mb=disk_mb,
             timeout_secs=timeout_secs if timeout_secs is not None else (resolved_preset.timeout_secs if resolved_preset else 600),
-            image=image,
+            image=image if image is not None else preset_image_for_backend,
             env_vars={**(resolved_preset.env_vars if resolved_preset else {}), **(env_vars or {})},
             allow_internet=allow_internet if allow_internet is not None else (resolved_preset.allow_internet if resolved_preset else True),
             app_name=app_name,
@@ -97,8 +108,16 @@ class Sandbox:
                 f"Failed to create sandbox on '{backend}': {exc}"
             ) from exc
 
-        # Run preset setup commands; destroy the sandbox if setup fails
-        if resolved_preset and resolved_preset.setup_commands:
+        # Skip setup commands if the preset image was used (everything
+        # is already baked into the image).  Fall back to setup_commands
+        # for backends that don't support images (local, ray, etc.).
+        _IMAGE_BACKENDS = {"docker", "daytona", "modal", "tensorlake"}
+        using_preset_image = (
+            preset_image_for_backend is not None
+            and self._config.image == preset_image_for_backend
+            and backend in _IMAGE_BACKENDS
+        )
+        if resolved_preset and resolved_preset.setup_commands and not using_preset_image:
             try:
                 self._run_preset_setup(resolved_preset)
             except Exception:
