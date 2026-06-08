@@ -117,7 +117,9 @@ register_preset(SandboxPreset(
     description="Node.js 20 LTS with TypeScript toolchain (typescript, ts-node, pnpm, yarn)",
     image=f"{IMAGE_REGISTRY}/node:{PRESET_IMAGE_TAG}",
     setup_commands=[
-        "npm install -g typescript ts-node pnpm yarn",
+        "npm install -g typescript ts-node",
+        "corepack enable",
+        "corepack prepare pnpm@latest yarn@stable --activate",
     ],
     memory_mb=2048,
 ))
