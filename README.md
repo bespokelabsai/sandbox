@@ -172,6 +172,39 @@ sb.download_file("/home/user/results.json", "./results.json")
 Presets are predefined sandbox configurations with setup commands that run after creation.
 Presets that install tools with `npm`, such as `codex`, `claude-code`, and `web-dev`, assume the sandbox image already includes Node.js and `npm`.
 
+#### Prebuilt Preset Images
+
+Most built-in presets also have prebuilt OCI images published to GitHub Container Registry:
+
+```text
+ghcr.io/bespokelabsai/sandbox/<preset>:v1
+```
+
+Docker, Daytona, and Modal use these images automatically when you pass a preset, then skip the preset's setup commands because the tools and Python packages are already baked into the image.
+
+The main advantage is that prebuilt images move setup work from sandbox startup time to image build time:
+
+- Sandboxes start faster because they do not reinstall the same tools for every run.
+- Startup is more reliable because it depends less on package registry availability during sandbox creation.
+- Preset environments are more reproducible because images use pinned tags instead of a moving `latest` tag.
+- Heavy presets such as `python-ml`, `python-data-science`, `codex`, and `claude-code` are practical to create repeatedly.
+
+For example, this Docker sandbox starts from `ghcr.io/bespokelabsai/sandbox/codex:v1` and does not run `npm install -g @openai/codex` at startup:
+
+```python
+with Sandbox("docker", preset="codex") as sb:
+    sb.execute_command("codex --version")
+```
+
+You can still override the image explicitly when you need a custom base image:
+
+```python
+with Sandbox("docker", preset="codex", image="my-registry/codex-tools:v3") as sb:
+    sb.execute_command("codex --version")
+```
+
+The Dockerfiles live under `images/<preset>/`. Local, Safehouse, Ray, and other backends that cannot use the prebuilt image still fall back to the preset setup commands. Tensorlake image names are project-scoped, so you can build/register equivalent images from the same Dockerfiles when you need Tensorlake-specific preset images.
+
 ```python
 # Sandbox with Codex CLI installed
 with Sandbox("docker", preset="codex") as sb:
