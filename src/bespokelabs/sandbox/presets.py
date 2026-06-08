@@ -114,10 +114,12 @@ register_preset(SandboxPreset(
 
 register_preset(SandboxPreset(
     name="node",
-    description="Node.js environment with npm",
+    description="Node.js 20 LTS with TypeScript toolchain (typescript, ts-node, pnpm, yarn)",
+    image=f"{IMAGE_REGISTRY}/node:{PRESET_IMAGE_TAG}",
     setup_commands=[
-        "node --version && npm --version",
+        "npm install -g typescript ts-node pnpm yarn",
     ],
+    memory_mb=2048,
 ))
 
 register_preset(SandboxPreset(
@@ -146,4 +148,241 @@ register_preset(SandboxPreset(
     name="empty",
     description="Bare sandbox with no additional setup",
     setup_commands=[],
+))
+
+# -- Language runtimes -----------------------------------------------------
+
+register_preset(SandboxPreset(
+    name="go",
+    description="Go 1.22 toolchain",
+    image=f"{IMAGE_REGISTRY}/go:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "go version",
+    ],
+    env_vars={"GOFLAGS": "-buildvcs=false"},
+    memory_mb=2048,
+))
+
+register_preset(SandboxPreset(
+    name="rust",
+    description="Rust toolchain with clippy and rustfmt",
+    image=f"{IMAGE_REGISTRY}/rust:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "rustup component add clippy rustfmt",
+    ],
+    memory_mb=2048,
+))
+
+register_preset(SandboxPreset(
+    name="java",
+    description="Java 21 (Temurin JDK) with Maven and Gradle",
+    image=f"{IMAGE_REGISTRY}/java:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "java -version && mvn -version && gradle -version",
+    ],
+    memory_mb=2048,
+))
+
+register_preset(SandboxPreset(
+    name="ruby",
+    description="Ruby 3.3 with bundler and rake",
+    image=f"{IMAGE_REGISTRY}/ruby:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "gem install bundler rake",
+    ],
+    memory_mb=1024,
+))
+
+register_preset(SandboxPreset(
+    name="php",
+    description="PHP 8.3 CLI with Composer",
+    image=f"{IMAGE_REGISTRY}/php:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "php --version && composer --version",
+    ],
+    memory_mb=1024,
+))
+
+register_preset(SandboxPreset(
+    name="dotnet",
+    description=".NET 8.0 SDK",
+    image=f"{IMAGE_REGISTRY}/dotnet:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "dotnet --version",
+    ],
+    env_vars={"DOTNET_CLI_TELEMETRY_OPTOUT": "1", "DOTNET_NOLOGO": "1"},
+    memory_mb=2048,
+))
+
+register_preset(SandboxPreset(
+    name="cpp",
+    description="C/C++ toolchain (gcc 13) with cmake, ninja, clang and gdb",
+    image=f"{IMAGE_REGISTRY}/cpp:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "gcc --version && cmake --version",
+    ],
+    memory_mb=2048,
+))
+
+register_preset(SandboxPreset(
+    name="r",
+    description="R 4.4.1 with data.table, ggplot2, dplyr and jsonlite",
+    image=f"{IMAGE_REGISTRY}/r:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "Rscript -e \"install.packages(c('data.table','ggplot2','dplyr','jsonlite'), repos='https://cloud.r-project.org')\"",
+    ],
+    memory_mb=2048,
+))
+
+# -- ML / AI ---------------------------------------------------------------
+
+register_preset(SandboxPreset(
+    name="pytorch",
+    description="PyTorch (CPU) with torchvision and torchaudio",
+    image=f"{IMAGE_REGISTRY}/pytorch:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision torchaudio",
+    ],
+    cpu=2.0,
+    memory_mb=4096,
+    timeout_secs=1800,
+))
+
+register_preset(SandboxPreset(
+    name="tensorflow",
+    description="TensorFlow (CPU build)",
+    image=f"{IMAGE_REGISTRY}/tensorflow:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "pip install tensorflow-cpu",
+    ],
+    cpu=2.0,
+    memory_mb=4096,
+    timeout_secs=1800,
+))
+
+register_preset(SandboxPreset(
+    name="huggingface",
+    description="Hugging Face stack (transformers, datasets, accelerate, hub, safetensors)",
+    image=f"{IMAGE_REGISTRY}/huggingface:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "pip install transformers datasets tokenizers accelerate huggingface-hub safetensors sentencepiece",
+    ],
+    env_vars={"HF_HUB_DISABLE_TELEMETRY": "1"},
+    cpu=2.0,
+    memory_mb=4096,
+    timeout_secs=1800,
+))
+
+register_preset(SandboxPreset(
+    name="nlp",
+    description="NLP toolkit (spaCy + NLTK) with en_core_web_sm and common corpora",
+    image=f"{IMAGE_REGISTRY}/nlp:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "pip install spacy nltk",
+        "python -m spacy download en_core_web_sm",
+        "python -m nltk.downloader -d /usr/share/nltk_data punkt stopwords wordnet",
+    ],
+    env_vars={"NLTK_DATA": "/usr/share/nltk_data"},
+    memory_mb=2048,
+    timeout_secs=1800,
+))
+
+register_preset(SandboxPreset(
+    name="llm",
+    description="LLM application stack (openai, anthropic, langchain, tiktoken, tenacity)",
+    image=f"{IMAGE_REGISTRY}/llm:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "pip install openai anthropic langchain langchain-core langchain-community tiktoken tenacity",
+    ],
+    memory_mb=2048,
+))
+
+register_preset(SandboxPreset(
+    name="scientific",
+    description="Scientific computing stack (numpy, scipy, sympy, networkx, statsmodels)",
+    image=f"{IMAGE_REGISTRY}/scientific:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "pip install numpy scipy sympy networkx statsmodels",
+    ],
+    memory_mb=2048,
+))
+
+# -- Web / scraping / browser ---------------------------------------------
+
+register_preset(SandboxPreset(
+    name="scraping",
+    description="Web scraping stack (requests, httpx, beautifulsoup4, lxml, parsel, scrapy)",
+    image=f"{IMAGE_REGISTRY}/scraping:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "pip install requests httpx beautifulsoup4 lxml parsel scrapy",
+    ],
+    memory_mb=2048,
+))
+
+register_preset(SandboxPreset(
+    name="playwright",
+    description="Playwright for Python with browsers pre-installed",
+    image=f"{IMAGE_REGISTRY}/playwright:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "pip install playwright",
+        "playwright install --with-deps chromium",
+    ],
+    cpu=2.0,
+    memory_mb=4096,
+    timeout_secs=1800,
+))
+
+register_preset(SandboxPreset(
+    name="selenium",
+    description="Selenium with headless Chromium and chromedriver",
+    image=f"{IMAGE_REGISTRY}/selenium:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "pip install selenium webdriver-manager",
+    ],
+    env_vars={"CHROME_BIN": "/usr/bin/chromium", "CHROMEDRIVER": "/usr/bin/chromedriver"},
+    cpu=2.0,
+    memory_mb=2048,
+    timeout_secs=1800,
+))
+
+register_preset(SandboxPreset(
+    name="fastapi",
+    description="FastAPI web framework with Uvicorn, Pydantic and httpx",
+    image=f"{IMAGE_REGISTRY}/fastapi:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "pip install fastapi 'uvicorn[standard]' pydantic httpx",
+    ],
+    memory_mb=2048,
+))
+
+# -- Data / documents / media ---------------------------------------------
+
+register_preset(SandboxPreset(
+    name="dataeng",
+    description="Data engineering stack (polars, duckdb, pyarrow, sqlalchemy)",
+    image=f"{IMAGE_REGISTRY}/dataeng:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "pip install polars duckdb pyarrow sqlalchemy",
+    ],
+    memory_mb=4096,
+))
+
+register_preset(SandboxPreset(
+    name="pdf",
+    description="PDF processing stack (pypdf, pdfplumber, reportlab, pdf2image) with poppler",
+    image=f"{IMAGE_REGISTRY}/pdf:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "pip install pypdf pdfplumber reportlab pdf2image",
+    ],
+    memory_mb=2048,
+))
+
+register_preset(SandboxPreset(
+    name="image",
+    description="Image processing stack (pillow, opencv-python-headless, scikit-image, numpy)",
+    image=f"{IMAGE_REGISTRY}/image:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "pip install pillow opencv-python-headless scikit-image numpy",
+    ],
+    memory_mb=2048,
 ))

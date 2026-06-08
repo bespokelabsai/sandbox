@@ -188,14 +188,63 @@ with Sandbox("e2b", preset="python-data-science") as sb:
 
 Built-in presets:
 
+**Agents**
+
 | Preset | What it installs | Defaults |
 |---|---|---|
 | `claude-code` | `@anthropic-ai/claude-code` via npm | 2GB RAM, 30min timeout |
+| `claude-sdk` | Claude Agent SDK + bundled Claude Code CLI | 2GB RAM, 30min timeout |
 | `codex` | `@openai/codex` via npm | 2GB RAM, 30min timeout |
+
+**Language runtimes**
+
+| Preset | What it installs | Defaults |
+|---|---|---|
+| `node` | Node.js 20 LTS + typescript, ts-node, pnpm, yarn | 2GB RAM |
+| `web-dev` | Node.js + typescript, ts-node, prettier, eslint | 2GB RAM |
+| `go` | Go 1.22 toolchain | 2GB RAM |
+| `rust` | Rust + clippy, rustfmt | 2GB RAM |
+| `java` | Java 21 (Temurin) + Maven, Gradle | 2GB RAM |
+| `ruby` | Ruby 3.3 + bundler, rake | defaults |
+| `php` | PHP 8.3 + Composer | defaults |
+| `dotnet` | .NET 8.0 SDK | 2GB RAM |
+| `cpp` | gcc 13 + cmake, ninja, clang, gdb | 2GB RAM |
+| `r` | R 4.4.1 + data.table, ggplot2, dplyr, jsonlite | 2GB RAM |
+
+**Machine learning / AI**
+
+| Preset | What it installs | Defaults |
+|---|---|---|
 | `python-data-science` | numpy, pandas, matplotlib, scikit-learn | 2GB RAM |
 | `python-ml` | torch, transformers, datasets, accelerate | 2 vCPU, 4GB RAM, 30min timeout |
-| `node` | Verifies node/npm are present | defaults |
-| `web-dev` | typescript, ts-node, prettier, eslint | 2GB RAM |
+| `pytorch` | torch, torchvision, torchaudio (CPU) | 2 vCPU, 4GB RAM, 30min timeout |
+| `tensorflow` | tensorflow-cpu | 2 vCPU, 4GB RAM, 30min timeout |
+| `huggingface` | transformers, datasets, accelerate, hub, safetensors | 2 vCPU, 4GB RAM, 30min timeout |
+| `nlp` | spaCy + NLTK (en_core_web_sm, common corpora) | 2GB RAM, 30min timeout |
+| `llm` | openai, anthropic, langchain, tiktoken, tenacity | 2GB RAM |
+| `scientific` | numpy, scipy, sympy, networkx, statsmodels | 2GB RAM |
+
+**Web / scraping / browser**
+
+| Preset | What it installs | Defaults |
+|---|---|---|
+| `scraping` | requests, httpx, beautifulsoup4, lxml, parsel, scrapy | 2GB RAM |
+| `playwright` | Playwright + browsers | 2 vCPU, 4GB RAM, 30min timeout |
+| `selenium` | selenium, webdriver-manager + headless Chromium | 2 vCPU, 2GB RAM, 30min timeout |
+| `fastapi` | fastapi, uvicorn, pydantic, httpx | 2GB RAM |
+
+**Data / documents / media**
+
+| Preset | What it installs | Defaults |
+|---|---|---|
+| `dataeng` | polars, duckdb, pyarrow, sqlalchemy | 4GB RAM |
+| `pdf` | pypdf, pdfplumber, reportlab, pdf2image + poppler | 2GB RAM |
+| `image` | pillow, opencv-headless, scikit-image, numpy | 2GB RAM |
+
+**Other**
+
+| Preset | What it installs | Defaults |
+|---|---|---|
 | `empty` | Nothing | defaults |
 
 Create your own:
