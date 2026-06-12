@@ -7,7 +7,6 @@ import tarfile
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
-    FeatureNotSupportedError,
     SandboxCreationError,
     SandboxExecutionError,
 )
@@ -16,27 +15,33 @@ from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, Sn
 _DEFAULT_IMAGE = "python:3.12-slim"
 
 
-class DockerAdapter:
-    def __init__(self) -> None:
-        self._client: object = None
-        self._container: object = None
-        self._timeout: int = 600
+class DockerClient:
+    """Factory for Docker sandboxes.
 
-    def create(self, config: SandboxConfig) -> None:
+    The daemon connection is established on first create() and reused
+    for every subsequent session created through this client.
+    """
+
+    def __init__(self) -> None:
         try:
             import docker  # type: ignore[import-untyped]
         except ImportError:
             raise BackendNotInstalledError(
                 "Docker SDK not installed. Run: pip install bespokelabs-sandbox[docker]"
             )
+        self._docker = docker
+        self._client: object = None
 
-        try:
-            self._client = docker.from_env()
-            self._client.ping()
-        except Exception as exc:
-            raise SandboxCreationError(
-                f"Cannot connect to Docker daemon. Is Docker running? {exc}"
-            ) from exc
+    def create(self, config: SandboxConfig) -> DockerSession:
+        if self._client is None:
+            try:
+                client = self._docker.from_env()
+                client.ping()
+            except Exception as exc:
+                raise SandboxCreationError(
+                    f"Cannot connect to Docker daemon. Is Docker running? {exc}"
+                ) from exc
+            self._client = client
 
         image = config.image or _DEFAULT_IMAGE
 
@@ -65,10 +70,19 @@ class DockerAdapter:
             create_kwargs["environment"] = config.env_vars
 
         try:
-            self._container = self._client.containers.run(**create_kwargs)
-            self._timeout = config.timeout_secs
+            container = self._client.containers.run(**create_kwargs)
         except Exception as exc:
             raise SandboxCreationError(f"Failed to create Docker container: {exc}") from exc
+
+        return DockerSession(container=container, timeout=config.timeout_secs)
+
+
+class DockerSession:
+    """One live Docker container."""
+
+    def __init__(self, *, container: object, timeout: int) -> None:
+        self._container: object = container
+        self._timeout = timeout
 
     def execute_code(self, code: str, language: str = "python") -> SandboxResult:
         try:

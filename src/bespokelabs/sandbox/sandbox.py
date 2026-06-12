@@ -14,15 +14,15 @@ from bespokelabs.sandbox.exceptions import (
     SandboxExecutionError,
 )
 from bespokelabs.sandbox.presets import PRESETS, SandboxPreset, get_preset, register_preset
-from bespokelabs.sandbox.protocols import SandboxBackend
+from bespokelabs.sandbox.protocols import SandboxBackendClient, SandboxBackendSession
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
 
 T = TypeVar("T")
 
 
 class Sandbox:
-    """Unified sandbox interface across Local, Safehouse, Docker, Ray, Daytona,
-    Tensorlake, Modal, and E2B.
+    """A live sandbox session with a unified interface across Local, Safehouse,
+    Docker, Ray, Daytona, Tensorlake, Modal, and E2B.
 
     Usage:
         with Sandbox("safehouse", timeout_secs=300) as sb:
@@ -37,6 +37,10 @@ class Sandbox:
         sb = Sandbox("modal", app_name="my-app")
         sb.execute_command("ls /")
         sb.destroy()
+
+    When creating many sandboxes on one backend, build a SandboxClient
+    once and call client.create(...) instead — provider-level connections
+    are then reused across sandboxes.
     """
 
     def __init__(
@@ -55,7 +59,10 @@ class Sandbox:
         template: str | None = None,
         snapshot_id: str | None = None,
         workdir: str | None = None,
+        _backend_client: SandboxBackendClient | None = None,
     ) -> None:
+        # _backend_client is internal: SandboxClient.create() passes its
+        # cached per-provider client here so connections are reused.
         backend = backend.lower().strip()
         if backend not in BACKENDS:
             raise SandboxError(
@@ -96,11 +103,11 @@ class Sandbox:
             workdir=workdir,
         )
         self._preset = resolved_preset
-        self._adapter: SandboxBackend = BACKENDS[backend]()
+        backend_client = _backend_client if _backend_client is not None else BACKENDS[backend]()
         self._destroyed = False
 
         try:
-            self._adapter.create(self._config)
+            self._session: SandboxBackendSession = backend_client.create(self._config)
         except (SandboxError, BackendNotInstalledError):
             raise
         except Exception as exc:
@@ -141,7 +148,7 @@ class Sandbox:
         accepts ``**kwargs``.
         """
         self._check_alive()
-        result = self._adapter.execute_code(code, language)
+        result = self._session.execute_code(code, language)
         if return_type is not None:
             return _parse_result(result, return_type)
         return result
@@ -164,7 +171,7 @@ class Sandbox:
         if return_type is not None and inject_schema and args:
             args = list(args)
             args[-1] = args[-1] + " " + json_schema(return_type)
-        result = self._adapter.execute_command(command, args)
+        result = self._session.execute_command(command, args)
         if return_type is not None:
             return _parse_result(result, return_type)
         return result
@@ -187,39 +194,39 @@ class Sandbox:
     def list_files(self, path: str = "/") -> list[FileInfo]:
         """List files and directories at the given path."""
         self._check_alive()
-        return self._adapter.list_files(path)
+        return self._session.list_files(path)
 
     def read_file(self, path: str) -> bytes:
         """Read file contents as bytes."""
         self._check_alive()
-        return self._adapter.read_file(path)
+        return self._session.read_file(path)
 
     def write_file(self, path: str, content: bytes | str) -> None:
         """Write content to a file in the sandbox."""
         self._check_alive()
-        return self._adapter.write_file(path, content)
+        return self._session.write_file(path, content)
 
     def upload_file(self, local_path: str, remote_path: str) -> None:
         """Upload a local file into the sandbox."""
         self._check_alive()
-        self._adapter.upload_file(local_path, remote_path)
+        self._session.upload_file(local_path, remote_path)
 
     def download_file(self, remote_path: str, local_path: str) -> None:
         """Download a file from the sandbox to a local path."""
         self._check_alive()
-        self._adapter.download_file(remote_path, local_path)
+        self._session.download_file(remote_path, local_path)
 
     # -- Lifecycle ---------------------------------------------------------
 
     def snapshot(self) -> SnapshotInfo:
         """Save the current sandbox state. Not all backends support this."""
         self._check_alive()
-        return self._adapter.snapshot()
+        return self._session.snapshot()
 
     def destroy(self) -> None:
         """Terminate and clean up the sandbox."""
         if not self._destroyed:
-            self._adapter.destroy()
+            self._session.destroy()
             self._destroyed = True
 
     # -- Context manager ---------------------------------------------------
@@ -261,12 +268,81 @@ class Sandbox:
     def _run_preset_setup(self, preset: SandboxPreset) -> None:
         """Run preset setup commands after sandbox creation."""
         for cmd in preset.setup_commands:
-            result = self._adapter.execute_command(cmd)
+            result = self._session.execute_command(cmd)
             if result.exit_code != 0:
                 raise SandboxCreationError(
                     f"Preset '{preset.name}' setup failed on command: {cmd}\n"
                     f"exit_code={result.exit_code}\nstderr={result.stderr}"
                 )
+
+
+class SandboxClient:
+    """Reusable factory for sandboxes on a single backend.
+
+    Construction validates the backend and verifies its SDK is installed,
+    without any network I/O.  Provider-level state (the Docker daemon
+    connection, Daytona auth, the Ray runtime) is established on first
+    create() and reused across calls, so one client can cheaply launch
+    many sandboxes:
+
+        client = SandboxClient("docker")
+        for task in tasks:
+            with client.create(preset="python-data-science") as sb:
+                sb.execute_code(task)
+
+    ``Sandbox(backend, ...)`` remains the one-step shorthand for
+    ``SandboxClient(backend).create(...)``.
+    """
+
+    def __init__(self, backend: str) -> None:
+        backend = backend.lower().strip()
+        if backend not in BACKENDS:
+            raise SandboxError(
+                f"Unknown backend '{backend}'. Choose from: {', '.join(BACKENDS)}"
+            )
+        self._backend_name = backend
+        self._backend_client: SandboxBackendClient = BACKENDS[backend]()
+
+    @property
+    def backend_name(self) -> str:
+        return self._backend_name
+
+    def create(
+        self,
+        *,
+        preset: str | SandboxPreset | None = None,
+        cpu: float | None = None,
+        memory_mb: int | None = None,
+        disk_mb: int | None = None,
+        timeout_secs: int | None = None,
+        image: str | None = None,
+        env_vars: dict[str, str] | None = None,
+        allow_internet: bool | None = None,
+        app_name: str | None = None,
+        template: str | None = None,
+        snapshot_id: str | None = None,
+        workdir: str | None = None,
+    ) -> Sandbox:
+        """Create a new sandbox session.
+
+        Accepts the same keyword arguments as ``Sandbox(...)``.
+        """
+        return Sandbox(
+            self._backend_name,
+            preset=preset,
+            cpu=cpu,
+            memory_mb=memory_mb,
+            disk_mb=disk_mb,
+            timeout_secs=timeout_secs,
+            image=image,
+            env_vars=env_vars,
+            allow_internet=allow_internet,
+            app_name=app_name,
+            template=template,
+            snapshot_id=snapshot_id,
+            workdir=workdir,
+            _backend_client=self._backend_client,
+        )
 
 
 # -- Structured output parsing ------------------------------------------------

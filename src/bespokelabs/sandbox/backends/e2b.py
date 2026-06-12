@@ -13,18 +13,19 @@ from bespokelabs.sandbox.exceptions import (
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
 
 
-class E2BAdapter:
-    def __init__(self) -> None:
-        self._sandbox: object = None
+class E2BClient:
+    """Factory for E2B sandboxes."""
 
-    def create(self, config: SandboxConfig) -> None:
+    def __init__(self) -> None:
         try:
             from e2b_code_interpreter import Sandbox as E2BSandbox  # type: ignore[import-untyped]
         except ImportError:
             raise BackendNotInstalledError(
                 "E2B SDK not installed. Run: pip install bespokelabs-sandbox[e2b]"
             )
+        self._sandbox_cls = E2BSandbox
 
+    def create(self, config: SandboxConfig) -> E2BSession:
         api_key = os.environ.get("E2B_API_KEY")
         if not api_key:
             raise SandboxCreationError("E2B_API_KEY environment variable is not set")
@@ -35,9 +36,18 @@ class E2BAdapter:
                 kwargs["template"] = config.template
             if config.env_vars:
                 kwargs["envs"] = config.env_vars
-            self._sandbox = E2BSandbox.create(**kwargs)
+            sandbox = self._sandbox_cls.create(**kwargs)
         except Exception as exc:
             raise SandboxCreationError(f"Failed to create E2B sandbox: {exc}") from exc
+
+        return E2BSession(sandbox=sandbox)
+
+
+class E2BSession:
+    """One live E2B sandbox."""
+
+    def __init__(self, *, sandbox: object) -> None:
+        self._sandbox: object = sandbox
 
     def execute_code(self, code: str, language: str = "python") -> SandboxResult:
         try:

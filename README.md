@@ -300,6 +300,26 @@ sb.is_alive       # True/False
 sb.backend_name   # "docker"
 ```
 
+### Reusing a client across many sandboxes
+
+`Sandbox(backend, ...)` builds a fresh provider connection per sandbox. When
+launching many sandboxes on one backend, create a `SandboxClient` once and
+reuse it — provider-level state (the Docker daemon connection, Daytona auth,
+the Ray runtime) is shared across `create()` calls:
+
+```python
+from bespokelabs.sandbox import SandboxClient
+
+client = SandboxClient("docker")
+
+for task in tasks:
+    with client.create(preset="python-data-science") as sb:
+        sb.execute_code(task)
+```
+
+`client.create(...)` accepts the same keyword arguments as `Sandbox(...)`
+and returns a regular `Sandbox` session.
+
 ## Feature Support Matrix
 
 | Feature | Local | Safehouse | Docker | Ray | Daytona | Tensorlake | Modal | E2B |

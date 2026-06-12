@@ -20,11 +20,12 @@ from bespokelabs.sandbox.exceptions import (
     SandboxExecutionError,
 )
 from bespokelabs.sandbox.presets import SandboxPreset
-from bespokelabs.sandbox.sandbox import Sandbox, json_schema
+from bespokelabs.sandbox.sandbox import Sandbox, SandboxClient, json_schema
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
 
 __all__ = [
     "Sandbox",
+    "SandboxClient",
     "SandboxPreset",
     "SandboxConfig",
     "SandboxResult",

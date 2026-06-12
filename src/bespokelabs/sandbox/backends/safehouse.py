@@ -22,10 +22,53 @@ from bespokelabs.sandbox.exceptions import (
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
 
 
-class SafehouseAdapter:
+class SafehouseClient:
+    """Factory for safehouse sandboxes.
+
+    Verifies the platform and CLI availability once at construction;
+    create() only has to set up a per-session working directory.
+    """
+
+    def __init__(self) -> None:
+        if platform.system() != "Darwin":
+            raise SandboxCreationError(
+                "The safehouse backend requires macOS (uses sandbox-exec)"
+            )
+        safehouse = shutil.which("safehouse")
+        if not safehouse:
+            raise BackendNotInstalledError(
+                "safehouse CLI not found. Install it with:\n"
+                "  brew install eugene1g/safehouse/agent-safehouse"
+            )
+        self._safehouse_bin = safehouse
+
+    def create(self, config: SandboxConfig) -> SafehouseSession:
+        try:
+            if config.workdir:
+                workdir = os.path.abspath(config.workdir)
+                os.makedirs(workdir, exist_ok=True)
+                owns_workdir = False
+            else:
+                workdir = tempfile.mkdtemp(prefix="sandbox_safehouse_")
+                owns_workdir = True
+            env = {**os.environ, **(config.env_vars or {})}
+            env["SANDBOX_ROOT"] = workdir
+            env["HOME"] = workdir
+            return SafehouseSession(
+                safehouse_bin=self._safehouse_bin,
+                workdir=workdir,
+                owns_workdir=owns_workdir,
+                timeout=config.timeout_secs,
+                env=env,
+            )
+        except Exception as exc:
+            raise SandboxCreationError(f"Failed to create safehouse sandbox: {exc}") from exc
+
+
+class SafehouseSession:
     """Sandbox backed by agent-safehouse on macOS.
 
-    Like the local adapter but wraps all process execution through
+    Like the local session but wraps all process execution through
     ``safehouse`` for OS-level filesystem and network restrictions via
     macOS sandbox-exec.  File helper methods (read_file, write_file, …)
     operate directly on the host filesystem since the restriction only
@@ -36,45 +79,22 @@ class SafehouseAdapter:
         - ``safehouse`` CLI installed (brew install eugene1g/safehouse/agent-safehouse)
     """
 
-    def __init__(self) -> None:
-        self._workdir: str | None = None
-        self._timeout: int = 600
-        self._env: dict[str, str] | None = None
-        self._owns_workdir: bool = True
-        self._safehouse_bin: str | None = None
+    def __init__(
+        self,
+        *,
+        safehouse_bin: str,
+        workdir: str,
+        owns_workdir: bool,
+        timeout: int,
+        env: dict[str, str],
+    ) -> None:
+        self._safehouse_bin = safehouse_bin
+        self._workdir: str | None = workdir
+        self._owns_workdir = owns_workdir
+        self._timeout = timeout
+        self._env = env
 
     # -- Lifecycle -------------------------------------------------------------
-
-    def create(self, config: SandboxConfig) -> None:
-        if platform.system() != "Darwin":
-            raise SandboxCreationError(
-                "The safehouse backend requires macOS (uses sandbox-exec)"
-            )
-
-        safehouse = shutil.which("safehouse")
-        if not safehouse:
-            raise BackendNotInstalledError(
-                "safehouse CLI not found. Install it with:\n"
-                "  brew install eugene1g/safehouse/agent-safehouse"
-            )
-        self._safehouse_bin = safehouse
-
-        try:
-            if config.workdir:
-                self._workdir = os.path.abspath(config.workdir)
-                os.makedirs(self._workdir, exist_ok=True)
-                self._owns_workdir = False
-            else:
-                self._workdir = tempfile.mkdtemp(prefix="sandbox_safehouse_")
-                self._owns_workdir = True
-            self._timeout = config.timeout_secs
-            self._env = {**os.environ, **(config.env_vars or {})}
-            self._env["SANDBOX_ROOT"] = self._workdir
-            self._env["HOME"] = self._workdir
-        except (SandboxCreationError, BackendNotInstalledError):
-            raise
-        except Exception as exc:
-            raise SandboxCreationError(f"Failed to create safehouse sandbox: {exc}") from exc
 
     def destroy(self) -> None:
         try:

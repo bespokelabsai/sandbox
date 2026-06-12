@@ -21,29 +21,25 @@ from bespokelabs.sandbox.exceptions import (
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
 
 
-class RayAdapter:
-    """Sandbox backed by a Ray cluster for distributed code execution.
+class RayClient:
+    """Factory for Ray-backed sandboxes.
 
-    Code runs on a Ray worker via a persistent actor. Supports both
-    local Ray clusters and remote clusters via base_url / RAY_ADDRESS.
+    Importing Ray happens once at construction; the Ray runtime is
+    initialized on first create() (Ray itself keeps that global) and
+    shared by every session created through this client.
     """
 
     def __init__(self) -> None:
-        self._ray = None
-        self._actor: object = None
-        self._timeout: int = 600
-
-    def create(self, config: SandboxConfig) -> None:
         try:
             import ray  # type: ignore[import-untyped]
         except ImportError:
             raise BackendNotInstalledError(
                 "Ray not installed. Run: pip install bespokelabs-sandbox[ray]"
             )
-
         self._ray = ray
-        self._timeout = config.timeout_secs
 
+    def create(self, config: SandboxConfig) -> RaySession:
+        ray = self._ray
         try:
             if not ray.is_initialized():
                 address = os.environ.get("RAY_ADDRESS")
@@ -53,7 +49,6 @@ class RayAdapter:
                     ray.init()
 
             # Create a persistent actor for this sandbox
-            actor_cpu = config.cpu
             env_vars = config.env_vars or {}
 
             @ray.remote
@@ -160,12 +155,19 @@ class RayAdapter:
                     if os.path.exists(self.workdir):
                         shutil.rmtree(self.workdir, ignore_errors=True)
 
-            ActorWithCpu = SandboxActor.options(num_cpus=actor_cpu)
-            self._actor = ActorWithCpu.remote(env_vars, self._timeout)
-        except BackendNotInstalledError:
-            raise
+            ActorWithCpu = SandboxActor.options(num_cpus=config.cpu)
+            actor = ActorWithCpu.remote(env_vars, config.timeout_secs)
+            return RaySession(ray=ray, actor=actor)
         except Exception as exc:
             raise SandboxCreationError(f"Failed to create Ray sandbox: {exc}") from exc
+
+
+class RaySession:
+    """One live sandbox actor on a Ray cluster (local or remote)."""
+
+    def __init__(self, *, ray: object, actor: object) -> None:
+        self._ray = ray
+        self._actor: object = actor
 
     def execute_code(self, code: str, language: str = "python") -> SandboxResult:
         try:
