@@ -12,6 +12,7 @@ Usage:
         print(result.stdout)
 """
 
+from bespokelabs.sandbox.aio import AsyncSandbox, AsyncSandboxClient
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     FeatureNotSupportedError,
@@ -26,6 +27,8 @@ from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, Sn
 __all__ = [
     "Sandbox",
     "SandboxClient",
+    "AsyncSandbox",
+    "AsyncSandboxClient",
     "SandboxPreset",
     "SandboxConfig",
     "SandboxResult",

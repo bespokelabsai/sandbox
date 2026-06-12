@@ -4,6 +4,7 @@ import io
 import os
 import pathlib
 import tarfile
+import threading
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
@@ -31,17 +32,22 @@ class DockerClient:
             )
         self._docker = docker
         self._client: object = None
+        # create() may run concurrently (e.g. via AsyncSandboxClient);
+        # guard the one-time daemon connection.
+        self._connect_lock = threading.Lock()
 
     def create(self, config: SandboxConfig) -> DockerSession:
         if self._client is None:
-            try:
-                client = self._docker.from_env()
-                client.ping()
-            except Exception as exc:
-                raise SandboxCreationError(
-                    f"Cannot connect to Docker daemon. Is Docker running? {exc}"
-                ) from exc
-            self._client = client
+            with self._connect_lock:
+                if self._client is None:
+                    try:
+                        client = self._docker.from_env()
+                        client.ping()
+                    except Exception as exc:
+                        raise SandboxCreationError(
+                            f"Cannot connect to Docker daemon. Is Docker running? {exc}"
+                        ) from exc
+                    self._client = client
 
         image = config.image or _DEFAULT_IMAGE
 

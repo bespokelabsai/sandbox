@@ -320,6 +320,35 @@ for task in tasks:
 `client.create(...)` accepts the same keyword arguments as `Sandbox(...)`
 and returns a regular `Sandbox` session.
 
+### Async
+
+`AsyncSandboxClient` / `AsyncSandbox` mirror the sync API with coroutine
+methods, so you can create and drive many sandboxes concurrently from one
+event loop:
+
+```python
+import asyncio
+from bespokelabs.sandbox import AsyncSandbox, AsyncSandboxClient
+
+async def run_snippet(client: AsyncSandboxClient, code: str) -> str:
+    async with await client.create(preset="python-data-science") as sb:
+        result = await sb.execute_code(code)
+        return result.stdout
+
+async def main():
+    client = AsyncSandboxClient("daytona")
+    outputs = await asyncio.gather(*(run_snippet(client, c) for c in snippets))
+
+asyncio.run(main())
+```
+
+One-step creation works too: `sb = await AsyncSandbox.create("local")`.
+
+Backend SDKs are synchronous, so async calls are offloaded to worker
+threads — the event loop is never blocked. Note that the missing-SDK check
+(`BackendNotInstalledError`) surfaces at the first `await client.create()`
+rather than at `AsyncSandboxClient(...)` construction, which does no I/O.
+
 ## Feature Support Matrix
 
 | Feature | Local | Safehouse | Docker | Ray | Daytona | Tensorlake | Modal | E2B |

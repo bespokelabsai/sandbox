@@ -5,6 +5,7 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
+import threading
 
 from bespokelabs.sandbox.backends._prelude import (
     PYTHON_PREAMBLE,
@@ -37,16 +38,20 @@ class RayClient:
                 "Ray not installed. Run: pip install bespokelabs-sandbox[ray]"
             )
         self._ray = ray
+        # create() may run concurrently (e.g. via AsyncSandboxClient);
+        # guard the one-time global ray.init().
+        self._init_lock = threading.Lock()
 
     def create(self, config: SandboxConfig) -> RaySession:
         ray = self._ray
         try:
-            if not ray.is_initialized():
-                address = os.environ.get("RAY_ADDRESS")
-                if address:
-                    ray.init(address=address)
-                else:
-                    ray.init()
+            with self._init_lock:
+                if not ray.is_initialized():
+                    address = os.environ.get("RAY_ADDRESS")
+                    if address:
+                        ray.init(address=address)
+                    else:
+                        ray.init()
 
             # Create a persistent actor for this sandbox
             env_vars = config.env_vars or {}

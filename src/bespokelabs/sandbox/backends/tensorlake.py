@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import pathlib
 import shlex
+import threading
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
@@ -28,11 +29,16 @@ class TensorlakeClient:
             )
         self._client_cls = TensorlakeSandboxClient
         self._client: object = None
+        # create() may run concurrently (e.g. via AsyncSandboxClient);
+        # guard the one-time SDK client construction.
+        self._connect_lock = threading.Lock()
 
     def create(self, config: SandboxConfig) -> TensorlakeSession:
         try:
             if self._client is None:
-                self._client = self._client_cls()
+                with self._connect_lock:
+                    if self._client is None:
+                        self._client = self._client_cls()
             kwargs: dict = {
                 "cpus": config.cpu,
                 "memory_mb": config.memory_mb,

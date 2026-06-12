@@ -4,6 +4,7 @@ import math
 import os
 import pathlib
 import shlex
+import threading
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
@@ -32,17 +33,22 @@ class DaytonaClient:
         self._daytona_cls = Daytona
         self._daytona_config_cls = DaytonaConfig
         self._client: object = None
+        # create() may run concurrently (e.g. via AsyncSandboxClient);
+        # guard the one-time authenticated client construction.
+        self._connect_lock = threading.Lock()
 
     def create(self, config: SandboxConfig) -> DaytonaSession:
         if self._client is None:
-            api_key = os.environ.get("DAYTONA_API_KEY")
-            if not api_key:
-                raise SandboxCreationError("DAYTONA_API_KEY environment variable is not set")
-            self._client = self._daytona_cls(self._daytona_config_cls(
-                api_key=api_key,
-                api_url=os.environ.get("DAYTONA_API_URL", "https://app.daytona.io/api"),
-                target=os.environ.get("DAYTONA_TARGET", "us"),
-            ))
+            with self._connect_lock:
+                if self._client is None:
+                    api_key = os.environ.get("DAYTONA_API_KEY")
+                    if not api_key:
+                        raise SandboxCreationError("DAYTONA_API_KEY environment variable is not set")
+                    self._client = self._daytona_cls(self._daytona_config_cls(
+                        api_key=api_key,
+                        api_url=os.environ.get("DAYTONA_API_URL", "https://app.daytona.io/api"),
+                        target=os.environ.get("DAYTONA_TARGET", "us"),
+                    ))
 
         try:
             params = _build_params(config)
