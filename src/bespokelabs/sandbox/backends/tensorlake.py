@@ -23,10 +23,10 @@ class TensorlakeClient:
     def __init__(self) -> None:
         try:
             from tensorlake.sandbox import SandboxClient as TensorlakeSandboxClient  # type: ignore[import-untyped]
-        except ImportError:
+        except ImportError as exc:
             raise BackendNotInstalledError(
                 "Tensorlake SDK not installed. Run: pip install bespokelabs-sandbox[tensorlake]"
-            )
+            ) from exc
         self._client_cls = TensorlakeSandboxClient
         self._client: object = None
         # create() may run concurrently (e.g. via AsyncSandboxClient);

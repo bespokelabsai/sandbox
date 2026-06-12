@@ -26,10 +26,10 @@ class DockerClient:
     def __init__(self) -> None:
         try:
             import docker  # type: ignore[import-untyped]
-        except ImportError:
+        except ImportError as exc:
             raise BackendNotInstalledError(
                 "Docker SDK not installed. Run: pip install bespokelabs-sandbox[docker]"
-            )
+            ) from exc
         self._docker = docker
         self._client: object = None
         # create() may run concurrently (e.g. via AsyncSandboxClient);

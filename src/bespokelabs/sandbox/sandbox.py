@@ -87,16 +87,18 @@ class Sandbox:
                 else resolved_preset.image
             )
 
-        # Merge: explicit kwargs override preset defaults
+        # Merge: explicit kwargs override preset defaults.  Without a
+        # preset, an empty SandboxPreset supplies the standard defaults.
+        defaults = resolved_preset if resolved_preset is not None else SandboxPreset(name="", description="")
         self._config = SandboxConfig(
             backend=backend,
-            cpu=cpu if cpu is not None else (resolved_preset.cpu if resolved_preset else 1.0),
-            memory_mb=memory_mb if memory_mb is not None else (resolved_preset.memory_mb if resolved_preset else 1024),
+            cpu=cpu if cpu is not None else defaults.cpu,
+            memory_mb=memory_mb if memory_mb is not None else defaults.memory_mb,
             disk_mb=disk_mb,
-            timeout_secs=timeout_secs if timeout_secs is not None else (resolved_preset.timeout_secs if resolved_preset else 600),
+            timeout_secs=timeout_secs if timeout_secs is not None else defaults.timeout_secs,
             image=image if image is not None else preset_image_for_backend,
-            env_vars={**(resolved_preset.env_vars if resolved_preset else {}), **(env_vars or {})},
-            allow_internet=allow_internet if allow_internet is not None else (resolved_preset.allow_internet if resolved_preset else True),
+            env_vars={**defaults.env_vars, **(env_vars or {})},
+            allow_internet=allow_internet if allow_internet is not None else defaults.allow_internet,
             app_name=app_name,
             template=template,
             snapshot_id=snapshot_id,
@@ -139,7 +141,9 @@ class Sandbox:
     @overload
     def execute_code(self, code: str, language: str = "python", *, return_type: type[T]) -> T: ...
 
-    def execute_code(self, code: str, language: str = "python", *, return_type: type[T] | None = None) -> SandboxResult | T:
+    def execute_code(
+        self, code: str, language: str = "python", *, return_type: type[T] | None = None
+    ) -> SandboxResult | T:
         """Execute a code snippet and return stdout/stderr/exit_code.
 
         If *return_type* is given, parse stdout as JSON and return an
@@ -157,9 +161,18 @@ class Sandbox:
     def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult: ...
 
     @overload
-    def execute_command(self, command: str, args: list[str] | None = None, *, return_type: type[T], inject_schema: bool = ...) -> T: ...
+    def execute_command(
+        self, command: str, args: list[str] | None = None, *, return_type: type[T], inject_schema: bool = ...
+    ) -> T: ...
 
-    def execute_command(self, command: str, args: list[str] | None = None, *, return_type: type[T] | None = None, inject_schema: bool = False) -> SandboxResult | T:
+    def execute_command(
+        self,
+        command: str,
+        args: list[str] | None = None,
+        *,
+        return_type: type[T] | None = None,
+        inject_schema: bool = False,
+    ) -> SandboxResult | T:
         """Execute a shell command and return stdout/stderr/exit_code.
 
         If *return_type* is given, stdout is parsed into an instance of

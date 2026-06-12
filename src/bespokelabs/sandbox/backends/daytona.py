@@ -26,10 +26,10 @@ class DaytonaClient:
     def __init__(self) -> None:
         try:
             from daytona import Daytona, DaytonaConfig  # type: ignore[import-untyped]
-        except ImportError:
+        except ImportError as exc:
             raise BackendNotInstalledError(
                 "Daytona SDK not installed. Run: pip install bespokelabs-sandbox[daytona]"
-            )
+            ) from exc
         self._daytona_cls = Daytona
         self._daytona_config_cls = DaytonaConfig
         self._client: object = None

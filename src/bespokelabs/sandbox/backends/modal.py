@@ -16,10 +16,10 @@ class ModalClient:
     def __init__(self) -> None:
         try:
             import modal  # type: ignore[import-untyped]
-        except ImportError:
+        except ImportError as exc:
             raise BackendNotInstalledError(
                 "Modal SDK not installed. Run: pip install bespokelabs-sandbox[modal]"
-            )
+            ) from exc
         self._modal = modal
 
     def create(self, config: SandboxConfig) -> ModalSession:

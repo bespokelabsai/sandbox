@@ -19,10 +19,10 @@ class E2BClient:
     def __init__(self) -> None:
         try:
             from e2b_code_interpreter import Sandbox as E2BSandbox  # type: ignore[import-untyped]
-        except ImportError:
+        except ImportError as exc:
             raise BackendNotInstalledError(
                 "E2B SDK not installed. Run: pip install bespokelabs-sandbox[e2b]"
-            )
+            ) from exc
         self._sandbox_cls = E2BSandbox
 
     def create(self, config: SandboxConfig) -> E2BSession:

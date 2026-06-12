@@ -33,10 +33,10 @@ class RayClient:
     def __init__(self) -> None:
         try:
             import ray  # type: ignore[import-untyped]
-        except ImportError:
+        except ImportError as exc:
             raise BackendNotInstalledError(
                 "Ray not installed. Run: pip install bespokelabs-sandbox[ray]"
-            )
+            ) from exc
         self._ray = ray
         # create() may run concurrently (e.g. via AsyncSandboxClient);
         # guard the one-time global ray.init().
