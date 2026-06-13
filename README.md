@@ -129,6 +129,11 @@ sb = Sandbox(
 
 Not every backend uses every parameter. Unsupported params are silently ignored.
 
+Constructing a `Sandbox` creates the underlying sandbox immediately. To launch
+many sandboxes on one backend, or to use `async`/`await`, see
+[Reusing a client across many sandboxes](#reusing-a-client-across-many-sandboxes)
+and [Async](#async).
+
 ### Executing Code
 
 ```python
@@ -318,7 +323,10 @@ for task in tasks:
 ```
 
 `client.create(...)` accepts the same keyword arguments as `Sandbox(...)`
-and returns a regular `Sandbox` session.
+and returns a regular `Sandbox` session. `SandboxClient(backend)` validates
+the backend name and SDK availability up front — it raises
+`BackendNotInstalledError` immediately if the backend's extra isn't
+installed — but performs no network I/O until `create()`.
 
 ### Async
 
