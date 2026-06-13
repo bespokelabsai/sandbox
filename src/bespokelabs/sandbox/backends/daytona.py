@@ -37,7 +37,7 @@ class DaytonaClient:
         # guard the one-time authenticated client construction.
         self._connect_lock = threading.Lock()
 
-    def create(self, config: SandboxConfig) -> DaytonaSession:
+    def _ensure_client(self) -> object:
         if self._client is None:
             with self._connect_lock:
                 if self._client is None:
@@ -49,6 +49,25 @@ class DaytonaClient:
                         api_url=os.environ.get("DAYTONA_API_URL", "https://app.daytona.io/api"),
                         target=os.environ.get("DAYTONA_TARGET", "us"),
                     ))
+        return self._client
+
+    def resume(self, data: dict) -> DaytonaSession:
+        client = self._ensure_client()
+        getter = getattr(client, "get", None) or getattr(client, "find_one", None)
+        if getter is None:
+            raise FeatureNotSupportedError(
+                "This Daytona SDK version has no get()/find_one(); cannot resume by id"
+            )
+        try:
+            sandbox = getter(data["sandbox_id"])
+        except Exception as exc:
+            raise SandboxCreationError(
+                f"Cannot resume Daytona sandbox '{data.get('sandbox_id')}': {exc}"
+            ) from exc
+        return DaytonaSession(client=client, sandbox=sandbox)
+
+    def create(self, config: SandboxConfig) -> DaytonaSession:
+        self._ensure_client()
 
         try:
             params = _build_params(config)
@@ -70,6 +89,8 @@ def _build_params(config: SandboxConfig) -> object | None:
     common: dict = {}
     if config.env_vars:
         common["env_vars"] = config.env_vars
+    if config.backend_options:
+        common.update(config.backend_options)
 
     if config.image:
         # Build resources if non-default cpu or memory is specified
@@ -172,6 +193,12 @@ class DaytonaSession:
         raise FeatureNotSupportedError(
             "Snapshots are not supported by the Daytona backend via this SDK"
         )
+
+    def session_state(self) -> dict:
+        sandbox_id = getattr(self._sandbox, "id", None)
+        if sandbox_id is None:
+            raise FeatureNotSupportedError("Daytona sandbox object exposes no id; cannot serialize")
+        return {"sandbox_id": str(sandbox_id)}
 
     def destroy(self) -> None:
         try:

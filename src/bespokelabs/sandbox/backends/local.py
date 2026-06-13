@@ -32,17 +32,27 @@ class LocalClient:
             else:
                 workdir = tempfile.mkdtemp(prefix="sandbox_local_")
                 owns_workdir = True
-            env = {**os.environ, **(config.env_vars or {})}
-            env["SANDBOX_ROOT"] = workdir
-            env["HOME"] = workdir
             return LocalSession(
                 workdir=workdir,
                 owns_workdir=owns_workdir,
                 timeout=config.timeout_secs,
-                env=env,
+                env_overlay=config.env_vars or {},
             )
         except Exception as exc:
             raise SandboxCreationError(f"Failed to create local sandbox: {exc}") from exc
+
+    def resume(self, data: dict) -> LocalSession:
+        workdir = data.get("workdir")
+        if not workdir or not os.path.isdir(workdir):
+            raise SandboxCreationError(
+                f"Cannot resume local sandbox: workdir '{workdir}' does not exist"
+            )
+        return LocalSession(
+            workdir=workdir,
+            owns_workdir=bool(data.get("owns_workdir", False)),
+            timeout=int(data.get("timeout", 600)),
+            env_overlay=data.get("env_vars") or {},
+        )
 
 
 class LocalSession:
@@ -60,11 +70,16 @@ class LocalSession:
     write_file("/hello.txt", ...).
     """
 
-    def __init__(self, *, workdir: str, owns_workdir: bool, timeout: int, env: dict[str, str]) -> None:
+    def __init__(self, *, workdir: str, owns_workdir: bool, timeout: int, env_overlay: dict[str, str]) -> None:
         self._workdir: str | None = workdir
         self._owns_workdir = owns_workdir
         self._timeout = timeout
-        self._env = env
+        # Only the caller-provided overlay is kept for session_state();
+        # the merged environment would serialize the whole host environ.
+        self._env_overlay = env_overlay
+        self._env = {**os.environ, **env_overlay}
+        self._env["SANDBOX_ROOT"] = workdir
+        self._env["HOME"] = workdir
 
     def execute_code(self, code: str, language: str = "python") -> SandboxResult:
         resolved = self._resolve_interpreter(language)
@@ -196,6 +211,14 @@ class LocalSession:
         raise FeatureNotSupportedError(
             "Snapshots are not supported by the local backend"
         )
+
+    def session_state(self) -> dict:
+        return {
+            "workdir": self._workdir,
+            "owns_workdir": self._owns_workdir,
+            "timeout": self._timeout,
+            "env_vars": self._env_overlay,
+        }
 
     def destroy(self) -> None:
         try:

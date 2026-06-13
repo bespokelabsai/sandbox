@@ -36,10 +36,24 @@ class E2BClient:
                 kwargs["template"] = config.template
             if config.env_vars:
                 kwargs["envs"] = config.env_vars
+            if config.backend_options:
+                kwargs.update(config.backend_options)
             sandbox = self._sandbox_cls.create(**kwargs)
         except Exception as exc:
             raise SandboxCreationError(f"Failed to create E2B sandbox: {exc}") from exc
 
+        return E2BSession(sandbox=sandbox)
+
+    def resume(self, data: dict) -> E2BSession:
+        api_key = os.environ.get("E2B_API_KEY")
+        if not api_key:
+            raise SandboxCreationError("E2B_API_KEY environment variable is not set")
+        try:
+            sandbox = self._sandbox_cls.connect(data["sandbox_id"])
+        except Exception as exc:
+            raise SandboxCreationError(
+                f"Cannot resume E2B sandbox '{data.get('sandbox_id')}': {exc}"
+            ) from exc
         return E2BSession(sandbox=sandbox)
 
 
@@ -119,6 +133,9 @@ class E2BSession:
         raise FeatureNotSupportedError(
             "Snapshots are not directly supported by the E2B code-interpreter SDK"
         )
+
+    def session_state(self) -> dict:
+        return {"sandbox_id": self._sandbox.sandbox_id}
 
     def destroy(self) -> None:
         try:

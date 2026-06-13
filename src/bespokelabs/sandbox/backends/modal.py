@@ -44,10 +44,22 @@ class ModalClient:
             if config.env_vars:
                 create_kwargs["secrets"] = [modal.Secret.from_dict(config.env_vars)]
 
+            if config.backend_options:
+                create_kwargs.update(config.backend_options)
+
             sandbox = modal.Sandbox.create(**create_kwargs)
         except Exception as exc:
             raise SandboxCreationError(f"Failed to create Modal sandbox: {exc}") from exc
 
+        return ModalSession(sandbox=sandbox)
+
+    def resume(self, data: dict) -> ModalSession:
+        try:
+            sandbox = self._modal.Sandbox.from_id(data["sandbox_id"])
+        except Exception as exc:
+            raise SandboxCreationError(
+                f"Cannot resume Modal sandbox '{data.get('sandbox_id')}': {exc}"
+            ) from exc
         return ModalSession(sandbox=sandbox)
 
 
@@ -139,6 +151,9 @@ class ModalSession:
             )
         except Exception as exc:
             raise SandboxExecutionError(f"Modal snapshot failed: {exc}") from exc
+
+    def session_state(self) -> dict:
+        return {"sandbox_id": self._sandbox.object_id}
 
     def destroy(self) -> None:
         try:
