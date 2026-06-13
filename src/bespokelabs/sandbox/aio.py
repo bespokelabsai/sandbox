@@ -30,7 +30,12 @@ from bespokelabs.sandbox.exceptions import SandboxError
 from bespokelabs.sandbox.presets import SandboxPreset
 from bespokelabs.sandbox.protocols import SandboxBackendClient
 from bespokelabs.sandbox.sandbox import Sandbox
-from bespokelabs.sandbox.types import FileInfo, SandboxResult, SnapshotInfo
+from bespokelabs.sandbox.types import (
+    FileInfo,
+    SandboxResult,
+    SandboxSessionState,
+    SnapshotInfo,
+)
 
 T = TypeVar("T")
 
@@ -68,6 +73,10 @@ class AsyncSandbox:
         template: str | None = None,
         snapshot_id: str | None = None,
         workdir: str | None = None,
+        backend_options: dict | None = None,
+        files: dict[str, bytes | str] | None = None,
+        git_repo: str | None = None,
+        git_ref: str | None = None,
     ) -> AsyncSandbox:
         """One-step async creation; mirrors ``Sandbox(backend, ...)``."""
         return await AsyncSandboxClient(backend).create(
@@ -83,7 +92,16 @@ class AsyncSandbox:
             template=template,
             snapshot_id=snapshot_id,
             workdir=workdir,
+            backend_options=backend_options,
+            files=files,
+            git_repo=git_repo,
+            git_ref=git_ref,
         )
+
+    @classmethod
+    async def resume(cls, state: SandboxSessionState) -> AsyncSandbox:
+        """Reattach to a running sandbox from serialized session state."""
+        return await AsyncSandboxClient(state.backend).resume(state)
 
     # -- Core operations ---------------------------------------------------
 
@@ -158,6 +176,14 @@ class AsyncSandbox:
         """Async version of :meth:`Sandbox.snapshot`."""
         return await asyncio.to_thread(self._sandbox.snapshot)
 
+    def session_state(self) -> SandboxSessionState:
+        """Serialize a reattachable handle to this running sandbox.
+
+        Synchronous — the state is assembled from in-memory handles
+        without any I/O.
+        """
+        return self._sandbox.session_state()
+
     async def destroy(self) -> None:
         """Terminate and clean up the sandbox."""
         await asyncio.to_thread(self._sandbox.destroy)
@@ -225,6 +251,10 @@ class AsyncSandboxClient:
         template: str | None = None,
         snapshot_id: str | None = None,
         workdir: str | None = None,
+        backend_options: dict | None = None,
+        files: dict[str, bytes | str] | None = None,
+        git_repo: str | None = None,
+        git_ref: str | None = None,
     ) -> AsyncSandbox:
         """Create a new sandbox session.
 
@@ -246,7 +276,19 @@ class AsyncSandboxClient:
             template=template,
             snapshot_id=snapshot_id,
             workdir=workdir,
+            backend_options=backend_options,
+            files=files,
+            git_repo=git_repo,
+            git_ref=git_ref,
             _backend_client=backend_client,
+        )
+        return AsyncSandbox(sandbox)
+
+    async def resume(self, state: SandboxSessionState) -> AsyncSandbox:
+        """Reattach to a running sandbox from serialized session state."""
+        backend_client = await self._get_backend_client()
+        sandbox = await asyncio.to_thread(
+            Sandbox._resume_with, self._backend_name, backend_client, state
         )
         return AsyncSandbox(sandbox)
 

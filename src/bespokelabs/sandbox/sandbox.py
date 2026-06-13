@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
+import shlex
 import typing
 from typing import TypeVar, overload
 
@@ -15,7 +16,13 @@ from bespokelabs.sandbox.exceptions import (
 )
 from bespokelabs.sandbox.presets import PRESETS, SandboxPreset, get_preset, register_preset
 from bespokelabs.sandbox.protocols import SandboxBackendClient, SandboxBackendSession
-from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
+from bespokelabs.sandbox.types import (
+    FileInfo,
+    SandboxConfig,
+    SandboxResult,
+    SandboxSessionState,
+    SnapshotInfo,
+)
 
 T = TypeVar("T")
 
@@ -59,6 +66,10 @@ class Sandbox:
         template: str | None = None,
         snapshot_id: str | None = None,
         workdir: str | None = None,
+        backend_options: dict | None = None,
+        files: dict[str, bytes | str] | None = None,
+        git_repo: str | None = None,
+        git_ref: str | None = None,
         _backend_client: SandboxBackendClient | None = None,
     ) -> None:
         # _backend_client is internal: SandboxClient.create() passes its
@@ -103,6 +114,7 @@ class Sandbox:
             template=template,
             snapshot_id=snapshot_id,
             workdir=workdir,
+            backend_options=backend_options or {},
         )
         self._preset = resolved_preset
         backend_client = _backend_client if _backend_client is not None else BACKENDS[backend]()
@@ -126,12 +138,20 @@ class Sandbox:
             and self._config.image == preset_image_for_backend
             and backend in _IMAGE_BACKENDS
         )
-        if resolved_preset and resolved_preset.setup_commands and not using_preset_image:
-            try:
+        # Materialize the workspace, then run setup. The repo is cloned
+        # first so files= can overlay onto it, and setup commands can
+        # rely on both being present. Any failure destroys the sandbox.
+        try:
+            if git_repo:
+                self._clone_repo(git_repo, git_ref)
+            if files:
+                for path, content in files.items():
+                    self._session.write_file(path, content)
+            if resolved_preset and resolved_preset.setup_commands and not using_preset_image:
                 self._run_preset_setup(resolved_preset)
-            except Exception:
-                self.destroy()
-                raise
+        except Exception:
+            self.destroy()
+            raise
 
     # -- Core operations ---------------------------------------------------
 
@@ -236,6 +256,26 @@ class Sandbox:
         self._check_alive()
         return self._session.snapshot()
 
+    def session_state(self) -> SandboxSessionState:
+        """Serialize a reattachable handle to this *running* sandbox.
+
+        The result is JSON-safe (see ``to_json()``/``from_json()``) and
+        can be passed to ``SandboxClient.resume()`` / ``Sandbox.resume()``
+        from another process while the sandbox is still alive.  Raises
+        FeatureNotSupportedError on backends without reattach support
+        (e.g. ray).
+        """
+        self._check_alive()
+        return SandboxSessionState(
+            backend=self._config.backend,
+            data=self._session.session_state(),
+        )
+
+    @classmethod
+    def resume(cls, state: SandboxSessionState) -> Sandbox:
+        """Reattach to a running sandbox from serialized session state."""
+        return SandboxClient(state.backend).resume(state)
+
     def destroy(self) -> None:
         """Terminate and clean up the sandbox."""
         if not self._destroyed:
@@ -288,6 +328,60 @@ class Sandbox:
                     f"exit_code={result.exit_code}\nstderr={result.stderr}"
                 )
 
+    def _clone_repo(self, repo: str, ref: str | None) -> None:
+        """Clone *repo* into the sandbox working directory.
+
+        Requires git inside the sandbox image. The destination is the
+        repository name; *ref* may be a branch or tag.
+        """
+        dest = repo.rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
+        cmd = "git clone --depth 1 "
+        if ref:
+            cmd += f"--branch {shlex.quote(ref)} "
+        cmd += f"{shlex.quote(repo)} {shlex.quote(dest)}"
+        result = self._session.execute_command(cmd, None)
+        if result.exit_code != 0:
+            raise SandboxCreationError(
+                f"git clone of '{repo}' failed (exit {result.exit_code}):\n{result.stderr[:500]}"
+            )
+
+    @classmethod
+    def _from_session(
+        cls,
+        backend: str,
+        session: SandboxBackendSession,
+        config: SandboxConfig,
+    ) -> Sandbox:
+        """Wrap an existing live backend session (used by resume)."""
+        sb = object.__new__(cls)
+        sb._config = config
+        sb._preset = None
+        sb._session = session
+        sb._destroyed = False
+        return sb
+
+    @classmethod
+    def _resume_with(
+        cls,
+        backend_name: str,
+        backend_client: SandboxBackendClient,
+        state: SandboxSessionState,
+    ) -> Sandbox:
+        """Shared resume implementation for the sync and async clients."""
+        if state.backend != backend_name:
+            raise SandboxError(
+                f"Session state is for backend '{state.backend}', not '{backend_name}'"
+            )
+        try:
+            session = backend_client.resume(state.data)
+        except (SandboxError, BackendNotInstalledError):
+            raise
+        except Exception as exc:
+            raise SandboxCreationError(
+                f"Failed to resume sandbox on '{backend_name}': {exc}"
+            ) from exc
+        return cls._from_session(backend_name, session, SandboxConfig(backend=backend_name))
+
 
 class SandboxClient:
     """Reusable factory for sandboxes on a single backend.
@@ -335,6 +429,10 @@ class SandboxClient:
         template: str | None = None,
         snapshot_id: str | None = None,
         workdir: str | None = None,
+        backend_options: dict | None = None,
+        files: dict[str, bytes | str] | None = None,
+        git_repo: str | None = None,
+        git_ref: str | None = None,
     ) -> Sandbox:
         """Create a new sandbox session.
 
@@ -354,8 +452,21 @@ class SandboxClient:
             template=template,
             snapshot_id=snapshot_id,
             workdir=workdir,
+            backend_options=backend_options,
+            files=files,
+            git_repo=git_repo,
+            git_ref=git_ref,
             _backend_client=self._backend_client,
         )
+
+    def resume(self, state: SandboxSessionState) -> Sandbox:
+        """Reattach to a running sandbox from serialized session state.
+
+        The state must come from a sandbox on this client's backend.
+        Resume skips preset setup and workspace materialization — the
+        sandbox is returned exactly as it is running.
+        """
+        return Sandbox._resume_with(self._backend_name, self._backend_client, state)
 
 
 # -- Structured output parsing ------------------------------------------------

@@ -166,6 +166,11 @@ class RayClient:
         except Exception as exc:
             raise SandboxCreationError(f"Failed to create Ray sandbox: {exc}") from exc
 
+    def resume(self, data: dict) -> RaySession:
+        raise FeatureNotSupportedError(
+            "Session resume is not supported by the Ray backend (anonymous actors)"
+        )
+
 
 class RaySession:
     """One live sandbox actor on a Ray cluster (local or remote)."""
@@ -229,6 +234,11 @@ class RaySession:
     def snapshot(self) -> SnapshotInfo:
         raise FeatureNotSupportedError(
             "Snapshots are not supported by the Ray backend"
+        )
+
+    def session_state(self) -> dict:
+        raise FeatureNotSupportedError(
+            "Session resume is not supported by the Ray backend (anonymous actors)"
         )
 
     def destroy(self) -> None:

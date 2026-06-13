@@ -36,7 +36,7 @@ class DockerClient:
         # guard the one-time daemon connection.
         self._connect_lock = threading.Lock()
 
-    def create(self, config: SandboxConfig) -> DockerSession:
+    def _connect(self) -> object:
         if self._client is None:
             with self._connect_lock:
                 if self._client is None:
@@ -48,6 +48,20 @@ class DockerClient:
                             f"Cannot connect to Docker daemon. Is Docker running? {exc}"
                         ) from exc
                     self._client = client
+        return self._client
+
+    def resume(self, data: dict) -> DockerSession:
+        client = self._connect()
+        try:
+            container = client.containers.get(data["container_id"])
+        except Exception as exc:
+            raise SandboxCreationError(
+                f"Cannot resume Docker sandbox '{data.get('container_id')}': {exc}"
+            ) from exc
+        return DockerSession(container=container, timeout=int(data.get("timeout", 600)))
+
+    def create(self, config: SandboxConfig) -> DockerSession:
+        self._connect()
 
         image = config.image or _DEFAULT_IMAGE
 
@@ -74,6 +88,9 @@ class DockerClient:
 
         if config.env_vars:
             create_kwargs["environment"] = config.env_vars
+
+        if config.backend_options:
+            create_kwargs.update(config.backend_options)
 
         try:
             container = self._client.containers.run(**create_kwargs)
@@ -214,6 +231,9 @@ class DockerSession:
             )
         except Exception as exc:
             raise SandboxExecutionError(f"Docker snapshot failed: {exc}") from exc
+
+    def session_state(self) -> dict:
+        return {"container_id": self._container.id, "timeout": self._timeout}
 
     def destroy(self) -> None:
         try:

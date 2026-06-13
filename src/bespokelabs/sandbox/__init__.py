@@ -22,7 +22,13 @@ from bespokelabs.sandbox.exceptions import (
 )
 from bespokelabs.sandbox.presets import SandboxPreset
 from bespokelabs.sandbox.sandbox import Sandbox, SandboxClient, json_schema
-from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
+from bespokelabs.sandbox.types import (
+    FileInfo,
+    SandboxConfig,
+    SandboxResult,
+    SandboxSessionState,
+    SnapshotInfo,
+)
 
 __all__ = [
     "Sandbox",
@@ -32,6 +38,7 @@ __all__ = [
     "SandboxPreset",
     "SandboxConfig",
     "SandboxResult",
+    "SandboxSessionState",
     "FileInfo",
     "SnapshotInfo",
     "SandboxError",

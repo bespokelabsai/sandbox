@@ -124,6 +124,10 @@ sb = Sandbox(
     app_name=None,        # App name (Modal)
     snapshot_id=None,     # Restore from snapshot (Tensorlake, Modal)
     workdir=None,         # Host directory to use as sandbox root (Safehouse)
+    backend_options=None, # dict merged into the backend's native create call
+    files=None,           # {path: bytes|str} written into the sandbox on create
+    git_repo=None,        # repo URL cloned into the sandbox on create
+    git_ref=None,         # branch/tag for git_repo
 )
 ```
 
@@ -270,6 +274,76 @@ with Sandbox("docker", preset="my-stack") as sb:
 ```
 
 Explicit kwargs always override preset defaults.
+
+### Declarative workspace
+
+Populate the sandbox at creation instead of scripting uploads afterwards.
+`files` are written after any `git_repo` clone, and both land before preset
+setup commands run:
+
+```python
+with Sandbox(
+    "docker",
+    preset="python-data-science",
+    git_repo="https://github.com/psf/requests",
+    git_ref="main",                      # optional branch/tag
+    files={"/work/run.py": "import requests; print(requests.__version__)"},
+) as sb:
+    sb.execute_command("python /work/run.py")
+```
+
+`files` values may be `str` or `bytes`. `git_repo` requires `git` in the
+sandbox image (the prebuilt preset images include it).
+
+### Backend-specific options
+
+`backend_options` is an escape hatch: the dict is merged into the backend's
+native creation call, so you can reach provider features the unified API
+doesn't model — without waiting for a new keyword. It is forwarded to Docker
+`containers.run`, Modal `Sandbox.create`, E2B `Sandbox.create`, Tensorlake
+`create_and_connect`, and Daytona's create params; ignored by local, safehouse,
+and ray.
+
+```python
+# e.g. set the container hostname (a Docker-only knob)
+with Sandbox("docker", backend_options={"hostname": "build-box"}) as sb:
+    sb.execute_command("hostname")
+```
+
+### Session state (resume)
+
+A **snapshot** saves state to restore later; **session state** is a
+lightweight, serializable handle that reattaches to a sandbox that is *still
+running* — including from another process or machine:
+
+```python
+sb = Sandbox("e2b", timeout_secs=600)
+sb.execute_command("echo hi > /tmp/work.txt")
+
+state = sb.session_state()
+blob = state.to_json()          # JSON-safe; stash in a queue/DB/file
+# ... do NOT destroy sb — the sandbox must stay alive to reattach ...
+
+# Elsewhere — another worker, another process:
+from bespokelabs.sandbox import Sandbox, SandboxSessionState
+
+sb2 = Sandbox.resume(SandboxSessionState.from_json(blob))
+print(sb2.read_file("/tmp/work.txt"))   # b"hi\n"
+```
+
+`SandboxClient("e2b").resume(state)` is equivalent and reuses a pooled client.
+Resume returns the sandbox as-is — preset setup and `files`/`git_repo`
+materialization are skipped.
+
+| Backend | Resume by | session_state payload |
+|---|---|---|
+| Docker | container id (`containers.get`) | `container_id` |
+| E2B | sandbox id (`Sandbox.connect`) | `sandbox_id` |
+| Modal | sandbox id (`Sandbox.from_id`) | `sandbox_id` |
+| Tensorlake | sandbox id (`client.connect`) | `sandbox_id` |
+| Daytona | sandbox id (`client.get`) | `sandbox_id` |
+| Local, Safehouse | host workdir | `workdir`, env overlay |
+| Ray | — (not supported) | raises `FeatureNotSupportedError` |
 
 ### Snapshots
 

@@ -7,6 +7,7 @@ import threading
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
+    FeatureNotSupportedError,
     SandboxCreationError,
     SandboxExecutionError,
 )
@@ -33,12 +34,16 @@ class TensorlakeClient:
         # guard the one-time SDK client construction.
         self._connect_lock = threading.Lock()
 
+    def _ensure_client(self) -> object:
+        if self._client is None:
+            with self._connect_lock:
+                if self._client is None:
+                    self._client = self._client_cls()
+        return self._client
+
     def create(self, config: SandboxConfig) -> TensorlakeSession:
         try:
-            if self._client is None:
-                with self._connect_lock:
-                    if self._client is None:
-                        self._client = self._client_cls()
+            client = self._ensure_client()
             kwargs: dict = {
                 "cpus": config.cpu,
                 "memory_mb": config.memory_mb,
@@ -49,11 +54,28 @@ class TensorlakeClient:
                 kwargs["image"] = config.image
             if config.snapshot_id:
                 kwargs["snapshot_id"] = config.snapshot_id
-            sandbox = self._client.create_and_connect(**kwargs)
+            if config.backend_options:
+                kwargs.update(config.backend_options)
+            sandbox = client.create_and_connect(**kwargs)
         except Exception as exc:
             raise SandboxCreationError(f"Failed to create Tensorlake sandbox: {exc}") from exc
 
-        return TensorlakeSession(client=self._client, sandbox=sandbox)
+        return TensorlakeSession(client=client, sandbox=sandbox)
+
+    def resume(self, data: dict) -> TensorlakeSession:
+        client = self._ensure_client()
+        connect = getattr(client, "connect", None)
+        if connect is None:
+            raise FeatureNotSupportedError(
+                "This Tensorlake SDK version has no connect(); cannot resume by id"
+            )
+        try:
+            sandbox = connect(data["sandbox_id"])
+        except Exception as exc:
+            raise SandboxCreationError(
+                f"Cannot resume Tensorlake sandbox '{data.get('sandbox_id')}': {exc}"
+            ) from exc
+        return TensorlakeSession(client=client, sandbox=sandbox)
 
 
 class TensorlakeSession:
@@ -154,6 +176,9 @@ class TensorlakeSession:
             )
         except Exception as exc:
             raise SandboxExecutionError(f"Tensorlake snapshot failed: {exc}") from exc
+
+    def session_state(self) -> dict:
+        return {"sandbox_id": str(self._sandbox.sandbox_id)}
 
     def destroy(self) -> None:
         try:

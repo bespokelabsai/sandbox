@@ -51,18 +51,29 @@ class SafehouseClient:
             else:
                 workdir = tempfile.mkdtemp(prefix="sandbox_safehouse_")
                 owns_workdir = True
-            env = {**os.environ, **(config.env_vars or {})}
-            env["SANDBOX_ROOT"] = workdir
-            env["HOME"] = workdir
             return SafehouseSession(
                 safehouse_bin=self._safehouse_bin,
                 workdir=workdir,
                 owns_workdir=owns_workdir,
                 timeout=config.timeout_secs,
-                env=env,
+                env_overlay=config.env_vars or {},
             )
         except Exception as exc:
             raise SandboxCreationError(f"Failed to create safehouse sandbox: {exc}") from exc
+
+    def resume(self, data: dict) -> SafehouseSession:
+        workdir = data.get("workdir")
+        if not workdir or not os.path.isdir(workdir):
+            raise SandboxCreationError(
+                f"Cannot resume safehouse sandbox: workdir '{workdir}' does not exist"
+            )
+        return SafehouseSession(
+            safehouse_bin=self._safehouse_bin,
+            workdir=workdir,
+            owns_workdir=bool(data.get("owns_workdir", False)),
+            timeout=int(data.get("timeout", 600)),
+            env_overlay=data.get("env_vars") or {},
+        )
 
 
 class SafehouseSession:
@@ -86,15 +97,28 @@ class SafehouseSession:
         workdir: str,
         owns_workdir: bool,
         timeout: int,
-        env: dict[str, str],
+        env_overlay: dict[str, str],
     ) -> None:
         self._safehouse_bin = safehouse_bin
         self._workdir: str | None = workdir
         self._owns_workdir = owns_workdir
         self._timeout = timeout
-        self._env = env
+        # Only the caller-provided overlay is kept for session_state();
+        # the merged environment would serialize the whole host environ.
+        self._env_overlay = env_overlay
+        self._env = {**os.environ, **env_overlay}
+        self._env["SANDBOX_ROOT"] = workdir
+        self._env["HOME"] = workdir
 
     # -- Lifecycle -------------------------------------------------------------
+
+    def session_state(self) -> dict:
+        return {
+            "workdir": self._workdir,
+            "owns_workdir": self._owns_workdir,
+            "timeout": self._timeout,
+            "env_vars": self._env_overlay,
+        }
 
     def destroy(self) -> None:
         try:
