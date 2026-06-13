@@ -113,18 +113,20 @@ class PresetImageResolutionTests(unittest.TestCase):
             setup_commands=["echo hi"],
         ))
 
-        def _make_adapter() -> mock.MagicMock:
-            adapter = mock.MagicMock()
-            adapter.execute_command.return_value = SandboxResult(
+        def _make_backend_client() -> mock.MagicMock:
+            session = mock.MagicMock()
+            session.execute_command.return_value = SandboxResult(
                 stdout="", stderr="", exit_code=0,
             )
-            return adapter
+            client = mock.MagicMock()
+            client.create.return_value = session
+            return client
 
         self._backends_patch = mock.patch.dict(
             "bespokelabs.sandbox.backends.BACKENDS",
             {
-                "docker": lambda: _make_adapter(),
-                "tensorlake": lambda: _make_adapter(),
+                "docker": lambda: _make_backend_client(),
+                "tensorlake": lambda: _make_backend_client(),
             },
             clear=False,
         )
@@ -138,13 +140,13 @@ class PresetImageResolutionTests(unittest.TestCase):
         sb = Sandbox(backend="docker", preset=self.PRESET_NAME)
 
         self.assertEqual(sb._config.image, "ghcr.io/test/img:latest")
-        sb._adapter.execute_command.assert_not_called()
+        sb._session.execute_command.assert_not_called()
 
     def test_tensorlake_inherits_tensorlake_image_and_skips_setup(self) -> None:
         sb = Sandbox(backend="tensorlake", preset=self.PRESET_NAME)
 
         self.assertEqual(sb._config.image, "tl-name")
-        sb._adapter.execute_command.assert_not_called()
+        sb._session.execute_command.assert_not_called()
 
     def test_tensorlake_without_tensorlake_image_runs_setup(self) -> None:
         # Built-in `claude-code` preset has image= set but no tensorlake_image,
@@ -152,7 +154,7 @@ class PresetImageResolutionTests(unittest.TestCase):
         sb = Sandbox(backend="tensorlake", preset="claude-code")
 
         self.assertIsNone(sb._config.image)
-        sb._adapter.execute_command.assert_called()
+        sb._session.execute_command.assert_called()
 
     def test_explicit_image_override_on_tensorlake_runs_setup(self) -> None:
         # Explicit override doesn't match preset.tensorlake_image, so we
@@ -164,7 +166,7 @@ class PresetImageResolutionTests(unittest.TestCase):
         )
 
         self.assertEqual(sb._config.image, "user-override")
-        sb._adapter.execute_command.assert_called()
+        sb._session.execute_command.assert_called()
 
 
 if __name__ == "__main__":

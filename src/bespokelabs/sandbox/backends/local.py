@@ -20,7 +20,32 @@ from bespokelabs.sandbox.exceptions import (
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
 
 
-class LocalAdapter:
+class LocalClient:
+    """Factory for local subprocess sandboxes. Stateless — nothing to connect to."""
+
+    def create(self, config: SandboxConfig) -> LocalSession:
+        try:
+            if config.workdir:
+                workdir = os.path.abspath(config.workdir)
+                os.makedirs(workdir, exist_ok=True)
+                owns_workdir = False
+            else:
+                workdir = tempfile.mkdtemp(prefix="sandbox_local_")
+                owns_workdir = True
+            env = {**os.environ, **(config.env_vars or {})}
+            env["SANDBOX_ROOT"] = workdir
+            env["HOME"] = workdir
+            return LocalSession(
+                workdir=workdir,
+                owns_workdir=owns_workdir,
+                timeout=config.timeout_secs,
+                env=env,
+            )
+        except Exception as exc:
+            raise SandboxCreationError(f"Failed to create local sandbox: {exc}") from exc
+
+
+class LocalSession:
     """Sandbox backed by local subprocess execution in a temp directory.
 
     No external dependencies, no Docker, no API keys.
@@ -35,27 +60,11 @@ class LocalAdapter:
     write_file("/hello.txt", ...).
     """
 
-    def __init__(self) -> None:
-        self._workdir: str | None = None
-        self._timeout: int = 600
-        self._env: dict[str, str] | None = None
-        self._owns_workdir: bool = True
-
-    def create(self, config: SandboxConfig) -> None:
-        try:
-            if config.workdir:
-                self._workdir = os.path.abspath(config.workdir)
-                os.makedirs(self._workdir, exist_ok=True)
-                self._owns_workdir = False
-            else:
-                self._workdir = tempfile.mkdtemp(prefix="sandbox_local_")
-                self._owns_workdir = True
-            self._timeout = config.timeout_secs
-            self._env = {**os.environ, **(config.env_vars or {})}
-            self._env["SANDBOX_ROOT"] = self._workdir
-            self._env["HOME"] = self._workdir
-        except Exception as exc:
-            raise SandboxCreationError(f"Failed to create local sandbox: {exc}") from exc
+    def __init__(self, *, workdir: str, owns_workdir: bool, timeout: int, env: dict[str, str]) -> None:
+        self._workdir: str | None = workdir
+        self._owns_workdir = owns_workdir
+        self._timeout = timeout
+        self._env = env
 
     def execute_code(self, code: str, language: str = "python") -> SandboxResult:
         resolved = self._resolve_interpreter(language)

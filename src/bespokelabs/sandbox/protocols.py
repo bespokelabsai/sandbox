@@ -6,8 +6,9 @@ from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, Sn
 
 
 @runtime_checkable
-class SandboxBackend(Protocol):
-    def create(self, config: SandboxConfig) -> None: ...
+class SandboxBackendSession(Protocol):
+    """A live sandbox instance on one backend."""
+
     def execute_code(self, code: str, language: str) -> SandboxResult: ...
     def execute_command(self, command: str, args: list[str] | None) -> SandboxResult: ...
     def list_files(self, path: str) -> list[FileInfo]: ...
@@ -17,3 +18,16 @@ class SandboxBackend(Protocol):
     def download_file(self, remote_path: str, local_path: str) -> None: ...
     def snapshot(self) -> SnapshotInfo: ...
     def destroy(self) -> None: ...
+
+
+@runtime_checkable
+class SandboxBackendClient(Protocol):
+    """Factory for sandbox sessions on one backend.
+
+    Construction verifies the backend is usable (SDK importable,
+    platform requirements met) without doing network I/O.  Provider
+    connections are established lazily in create() and reused across
+    calls, so one client can cheaply create many sessions.
+    """
+
+    def create(self, config: SandboxConfig) -> SandboxBackendSession: ...

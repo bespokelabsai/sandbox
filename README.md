@@ -129,6 +129,11 @@ sb = Sandbox(
 
 Not every backend uses every parameter. Unsupported params are silently ignored.
 
+Constructing a `Sandbox` creates the underlying sandbox immediately. To launch
+many sandboxes on one backend, or to use `async`/`await`, see
+[Reusing a client across many sandboxes](#reusing-a-client-across-many-sandboxes)
+and [Async](#async).
+
 ### Executing Code
 
 ```python
@@ -299,6 +304,58 @@ sb.destroy()
 sb.is_alive       # True/False
 sb.backend_name   # "docker"
 ```
+
+### Reusing a client across many sandboxes
+
+`Sandbox(backend, ...)` builds a fresh provider connection per sandbox. When
+launching many sandboxes on one backend, create a `SandboxClient` once and
+reuse it — provider-level state (the Docker daemon connection, Daytona auth,
+the Ray runtime) is shared across `create()` calls:
+
+```python
+from bespokelabs.sandbox import SandboxClient
+
+client = SandboxClient("docker")
+
+for task in tasks:
+    with client.create(preset="python-data-science") as sb:
+        sb.execute_code(task)
+```
+
+`client.create(...)` accepts the same keyword arguments as `Sandbox(...)`
+and returns a regular `Sandbox` session. `SandboxClient(backend)` validates
+the backend name and SDK availability up front — it raises
+`BackendNotInstalledError` immediately if the backend's extra isn't
+installed — but performs no network I/O until `create()`.
+
+### Async
+
+`AsyncSandboxClient` / `AsyncSandbox` mirror the sync API with coroutine
+methods, so you can create and drive many sandboxes concurrently from one
+event loop:
+
+```python
+import asyncio
+from bespokelabs.sandbox import AsyncSandbox, AsyncSandboxClient
+
+async def run_snippet(client: AsyncSandboxClient, code: str) -> str:
+    async with await client.create(preset="python-data-science") as sb:
+        result = await sb.execute_code(code)
+        return result.stdout
+
+async def main():
+    client = AsyncSandboxClient("daytona")
+    outputs = await asyncio.gather(*(run_snippet(client, c) for c in snippets))
+
+asyncio.run(main())
+```
+
+One-step creation works too: `sb = await AsyncSandbox.create("local")`.
+
+Backend SDKs are synchronous, so async calls are offloaded to worker
+threads — the event loop is never blocked. Note that the missing-SDK check
+(`BackendNotInstalledError`) surfaces at the first `await client.create()`
+rather than at `AsyncSandboxClient(...)` construction, which does no I/O.
 
 ## Feature Support Matrix
 

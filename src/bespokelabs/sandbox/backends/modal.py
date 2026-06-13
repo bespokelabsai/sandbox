@@ -10,25 +10,26 @@ from bespokelabs.sandbox.exceptions import (
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
 
 
-class ModalAdapter:
-    def __init__(self) -> None:
-        self._app: object = None
-        self._sandbox: object = None
+class ModalClient:
+    """Factory for Modal sandboxes."""
 
-    def create(self, config: SandboxConfig) -> None:
+    def __init__(self) -> None:
         try:
             import modal  # type: ignore[import-untyped]
-        except ImportError:
+        except ImportError as exc:
             raise BackendNotInstalledError(
                 "Modal SDK not installed. Run: pip install bespokelabs-sandbox[modal]"
-            )
+            ) from exc
+        self._modal = modal
 
+    def create(self, config: SandboxConfig) -> ModalSession:
+        modal = self._modal
         try:
             app_name = config.app_name or "sandbox-sdk"
-            self._app = modal.App.lookup(app_name, create_if_missing=True)
+            app = modal.App.lookup(app_name, create_if_missing=True)
 
             create_kwargs: dict = {
-                "app": self._app,
+                "app": app,
                 "timeout": config.timeout_secs,
                 "cpu": config.cpu,
                 "memory": config.memory_mb,
@@ -43,11 +44,18 @@ class ModalAdapter:
             if config.env_vars:
                 create_kwargs["secrets"] = [modal.Secret.from_dict(config.env_vars)]
 
-            self._sandbox = modal.Sandbox.create(**create_kwargs)
-        except BackendNotInstalledError:
-            raise
+            sandbox = modal.Sandbox.create(**create_kwargs)
         except Exception as exc:
             raise SandboxCreationError(f"Failed to create Modal sandbox: {exc}") from exc
+
+        return ModalSession(sandbox=sandbox)
+
+
+class ModalSession:
+    """One live Modal sandbox."""
+
+    def __init__(self, *, sandbox: object) -> None:
+        self._sandbox: object = sandbox
 
     def execute_code(self, code: str, language: str = "python") -> SandboxResult:
         try:
