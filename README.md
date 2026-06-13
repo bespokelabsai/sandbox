@@ -312,21 +312,35 @@ Explicit kwargs always override preset defaults.
 
 Populate the sandbox at creation instead of scripting uploads afterwards.
 `files` are written after any `git_repo` clone, and both land before preset
-setup commands run:
+setup commands run.
+
+`files` needs nothing special and works on every backend and image:
 
 ```python
 with Sandbox(
     "docker",
     preset="python-data-science",
-    git_repo="https://github.com/psf/requests",
-    git_ref="main",                      # optional branch/tag
-    files={"/work/run.py": "import requests; print(requests.__version__)"},
+    files={"/work/run.py": "import pandas as pd; print(pd.__version__)"},
 ) as sb:
-    sb.execute_command("python /work/run.py")
+    print(sb.execute_command("python", ["/work/run.py"]).stdout)
 ```
 
-`files` values may be `str` or `bytes`. `git_repo` requires `git` in the
-sandbox image (the prebuilt preset images include it).
+`files` values may be `str` or `bytes`.
+
+`git_repo` runs `git clone` **inside** the sandbox, so `git` must be present in
+the image. The prebuilt preset images are slim and do **not** bundle `git` —
+pass an `image` that ships it, install it in a custom image, or use a host-based
+backend (`local`, `safehouse`), which use the host's `git`:
+
+```python
+with Sandbox(
+    "local",
+    git_repo="https://github.com/psf/requests",
+    git_ref="main",                      # optional branch/tag
+) as sb:
+    entries = sb.list_files("/requests")  # repo is cloned to /<repo-name>
+    print(f"cloned {len(entries)} entries")
+```
 
 ### Backend-specific options
 
