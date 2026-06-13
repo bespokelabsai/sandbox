@@ -2,6 +2,7 @@
 FROM gcc:13-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
     cmake \
     ninja-build \
     clang \

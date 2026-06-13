@@ -85,7 +85,7 @@ class NewImagePresetTests(unittest.TestCase):
                 preset = get_preset(name)
                 self.assertEqual(
                     preset.image,
-                    f"ghcr.io/bespokelabsai/sandbox/{name}:v1",
+                    f"ghcr.io/bespokelabsai/sandbox/{name}:v2",
                 )
 
     def test_each_new_preset_has_setup_commands_fallback(self) -> None:

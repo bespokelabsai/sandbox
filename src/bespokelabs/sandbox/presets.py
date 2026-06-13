@@ -65,7 +65,10 @@ IMAGE_REGISTRY = "ghcr.io/bespokelabsai/sandbox"
 # Pinned tag for preset images. Bump to cut a new immutable image set,
 # then run the build-images workflow_dispatch with the same tag value.
 # Never use ":latest" here — it's not reproducible.
-PRESET_IMAGE_TAG = "v1"
+#
+# v2: every preset image now installs git, so git_repo= works on all of
+#     them (v1 images were slim-based and lacked git).
+PRESET_IMAGE_TAG = "v2"
 
 # -- Built-in presets ------------------------------------------------------
 

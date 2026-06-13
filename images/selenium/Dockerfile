@@ -5,6 +5,7 @@ ENV CHROME_BIN=/usr/bin/chromium \
     CHROMEDRIVER=/usr/bin/chromedriver
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
     chromium \
     chromium-driver \
     fonts-liberation \

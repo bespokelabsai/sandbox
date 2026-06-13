@@ -8,6 +8,7 @@ ENV MAVEN_VERSION=3.9.9 \
 ENV PATH="${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
     curl \
     unzip \
     ca-certificates \

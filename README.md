@@ -186,7 +186,7 @@ Presets that install tools with `npm`, such as `codex`, `claude-code`, and `web-
 Most built-in presets also have prebuilt OCI images published to GitHub Container Registry:
 
 ```text
-ghcr.io/bespokelabsai/sandbox/<preset>:v1
+ghcr.io/bespokelabsai/sandbox/<preset>:v2
 ```
 
 Docker, Daytona, and Modal use these images automatically when you pass a preset, then skip the preset's setup commands because the tools and Python packages are already baked into the image.
@@ -198,7 +198,7 @@ The main advantage is that prebuilt images move setup work from sandbox startup 
 - Preset environments are more reproducible because images use pinned tags instead of a moving `latest` tag.
 - Heavy presets such as `python-ml`, `python-data-science`, `codex`, and `claude-code` are practical to create repeatedly.
 
-For example, this Docker sandbox starts from `ghcr.io/bespokelabsai/sandbox/codex:v1` and does not run `npm install -g @openai/codex` at startup:
+For example, this Docker sandbox starts from `ghcr.io/bespokelabsai/sandbox/codex:v2` and does not run `npm install -g @openai/codex` at startup:
 
 ```python
 with Sandbox("docker", preset="codex") as sb:
@@ -328,9 +328,9 @@ with Sandbox(
 `files` values may be `str` or `bytes`.
 
 `git_repo` runs `git clone` **inside** the sandbox, so `git` must be present in
-the image. The prebuilt preset images are slim and do **not** bundle `git` —
-pass an `image` that ships it, install it in a custom image, or use a host-based
-backend (`local`, `safehouse`), which use the host's `git`:
+the image. All prebuilt preset images include `git`, so `git_repo` works with
+any preset on Docker/Daytona/Modal. For a custom `image`, make sure `git` is
+installed; the host-based backends (`local`, `safehouse`) use the host's `git`.
 
 ```python
 with Sandbox(
