@@ -124,10 +124,19 @@ sb = Sandbox(
     app_name=None,        # App name (Modal)
     snapshot_id=None,     # Restore from snapshot (Tensorlake, Modal)
     workdir=None,         # Host directory to use as sandbox root (Safehouse)
+    backend_options=None, # dict merged into the backend's native create call
+    files=None,           # {path: bytes|str} written into the sandbox on create
+    git_repo=None,        # repo URL cloned into the sandbox on create
+    git_ref=None,         # branch/tag for git_repo
 )
 ```
 
 Not every backend uses every parameter. Unsupported params are silently ignored.
+
+Constructing a `Sandbox` creates the underlying sandbox immediately. To launch
+many sandboxes on one backend, or to use `async`/`await`, see
+[Reusing a client across many sandboxes](#reusing-a-client-across-many-sandboxes)
+and [Async](#async).
 
 ### Executing Code
 
@@ -177,7 +186,7 @@ Presets that install tools with `npm`, such as `codex`, `claude-code`, and `web-
 Most built-in presets also have prebuilt OCI images published to GitHub Container Registry:
 
 ```text
-ghcr.io/bespokelabsai/sandbox/<preset>:v1
+ghcr.io/bespokelabsai/sandbox/<preset>:v2
 ```
 
 Docker, Daytona, and Modal use these images automatically when you pass a preset, then skip the preset's setup commands because the tools and Python packages are already baked into the image.
@@ -189,7 +198,7 @@ The main advantage is that prebuilt images move setup work from sandbox startup 
 - Preset environments are more reproducible because images use pinned tags instead of a moving `latest` tag.
 - Heavy presets such as `python-ml`, `python-data-science`, `codex`, and `claude-code` are practical to create repeatedly.
 
-For example, this Docker sandbox starts from `ghcr.io/bespokelabsai/sandbox/codex:v1` and does not run `npm install -g @openai/codex` at startup:
+For example, this Docker sandbox starts from `ghcr.io/bespokelabsai/sandbox/codex:v2` and does not run `npm install -g @openai/codex` at startup:
 
 ```python
 with Sandbox("docker", preset="codex") as sb:
@@ -221,14 +230,63 @@ with Sandbox("e2b", preset="python-data-science") as sb:
 
 Built-in presets:
 
+**Agents**
+
 | Preset | What it installs | Defaults |
 |---|---|---|
 | `claude-code` | `@anthropic-ai/claude-code` via npm | 2GB RAM, 30min timeout |
+| `claude-sdk` | Claude Agent SDK + bundled Claude Code CLI | 2GB RAM, 30min timeout |
 | `codex` | `@openai/codex` via npm | 2GB RAM, 30min timeout |
+
+**Language runtimes**
+
+| Preset | What it installs | Defaults |
+|---|---|---|
+| `node` | Node.js 20 LTS + typescript, ts-node, pnpm, yarn | 2GB RAM |
+| `web-dev` | Node.js + typescript, ts-node, prettier, eslint | 2GB RAM |
+| `go` | Go 1.22 toolchain | 2GB RAM |
+| `rust` | Rust + clippy, rustfmt | 2GB RAM |
+| `java` | Java 21 (Temurin) + Maven, Gradle | 2GB RAM |
+| `ruby` | Ruby 3.3 + bundler, rake | defaults |
+| `php` | PHP 8.3 + Composer | defaults |
+| `dotnet` | .NET 8.0 SDK | 2GB RAM |
+| `cpp` | gcc 13 + cmake, ninja, clang, gdb | 2GB RAM |
+| `r` | R 4.4.1 + data.table, ggplot2, dplyr, jsonlite | 2GB RAM |
+
+**Machine learning / AI**
+
+| Preset | What it installs | Defaults |
+|---|---|---|
 | `python-data-science` | numpy, pandas, matplotlib, scikit-learn | 2GB RAM |
 | `python-ml` | torch, transformers, datasets, accelerate | 2 vCPU, 4GB RAM, 30min timeout |
-| `node` | Verifies node/npm are present | defaults |
-| `web-dev` | typescript, ts-node, prettier, eslint | 2GB RAM |
+| `pytorch` | torch, torchvision, torchaudio (CPU) | 2 vCPU, 4GB RAM, 30min timeout |
+| `tensorflow` | tensorflow-cpu | 2 vCPU, 4GB RAM, 30min timeout |
+| `huggingface` | transformers, datasets, accelerate, hub, safetensors | 2 vCPU, 4GB RAM, 30min timeout |
+| `nlp` | spaCy + NLTK (en_core_web_sm, common corpora) | 2GB RAM, 30min timeout |
+| `llm` | openai, anthropic, langchain, tiktoken, tenacity | 2GB RAM |
+| `scientific` | numpy, scipy, sympy, networkx, statsmodels | 2GB RAM |
+
+**Web / scraping / browser**
+
+| Preset | What it installs | Defaults |
+|---|---|---|
+| `scraping` | requests, httpx, beautifulsoup4, lxml, parsel, scrapy | 2GB RAM |
+| `playwright` | Playwright + browsers | 2 vCPU, 4GB RAM, 30min timeout |
+| `selenium` | selenium, webdriver-manager + headless Chromium | 2 vCPU, 2GB RAM, 30min timeout |
+| `fastapi` | fastapi, uvicorn, pydantic, httpx | 2GB RAM |
+
+**Data / documents / media**
+
+| Preset | What it installs | Defaults |
+|---|---|---|
+| `dataeng` | polars, duckdb, pyarrow, sqlalchemy | 4GB RAM |
+| `pdf` | pypdf, pdfplumber, reportlab, pdf2image + poppler | 2GB RAM |
+| `image` | pillow, opencv-headless, scikit-image, numpy | 2GB RAM |
+
+**Other**
+
+| Preset | What it installs | Defaults |
+|---|---|---|
 | `empty` | Nothing | defaults |
 
 Create your own:
@@ -249,6 +307,90 @@ with Sandbox("docker", preset="my-stack") as sb:
 ```
 
 Explicit kwargs always override preset defaults.
+
+### Declarative workspace
+
+Populate the sandbox at creation instead of scripting uploads afterwards.
+`files` are written after any `git_repo` clone, and both land before preset
+setup commands run.
+
+`files` needs nothing special and works on every backend and image:
+
+```python
+with Sandbox(
+    "docker",
+    preset="python-data-science",
+    files={"/work/run.py": "import pandas as pd; print(pd.__version__)"},
+) as sb:
+    print(sb.execute_command("python", ["/work/run.py"]).stdout)
+```
+
+`files` values may be `str` or `bytes`.
+
+`git_repo` runs `git clone` **inside** the sandbox, so `git` must be present in
+the image. All prebuilt preset images include `git`, so `git_repo` works with
+any preset on Docker/Daytona/Modal. For a custom `image`, make sure `git` is
+installed; the host-based backends (`local`, `safehouse`) use the host's `git`.
+
+```python
+with Sandbox(
+    "local",
+    git_repo="https://github.com/psf/requests",
+    git_ref="main",                      # optional branch/tag
+) as sb:
+    entries = sb.list_files("/requests")  # repo is cloned to /<repo-name>
+    print(f"cloned {len(entries)} entries")
+```
+
+### Backend-specific options
+
+`backend_options` is an escape hatch: the dict is merged into the backend's
+native creation call, so you can reach provider features the unified API
+doesn't model — without waiting for a new keyword. It is forwarded to Docker
+`containers.run`, Modal `Sandbox.create`, E2B `Sandbox.create`, Tensorlake
+`create_and_connect`, and Daytona's create params; ignored by local, safehouse,
+and ray.
+
+```python
+# e.g. set the container hostname (a Docker-only knob)
+with Sandbox("docker", backend_options={"hostname": "build-box"}) as sb:
+    sb.execute_command("hostname")
+```
+
+### Session state (resume)
+
+A **snapshot** saves state to restore later; **session state** is a
+lightweight, serializable handle that reattaches to a sandbox that is *still
+running* — including from another process or machine:
+
+```python
+sb = Sandbox("e2b", timeout_secs=600)
+sb.execute_command("echo hi > /tmp/work.txt")
+
+state = sb.session_state()
+blob = state.to_json()          # JSON-safe; stash in a queue/DB/file
+# ... do NOT destroy sb — the sandbox must stay alive to reattach ...
+
+# Elsewhere — another worker, another process:
+from bespokelabs.sandbox import Sandbox, SandboxSessionState
+
+sb2 = Sandbox.resume(SandboxSessionState.from_json(blob))
+print(sb2.read_file("/tmp/work.txt"))   # b"hi\n"
+```
+
+`SandboxClient("e2b").resume(state)` is equivalent and reuses a pooled client.
+Resume returns the sandbox as-is — preset setup and `files`/`git_repo`
+materialization are skipped.
+
+| Backend | Resume by | session_state payload |
+|---|---|---|
+| Docker | container id (`containers.get`) | `container_id` |
+| E2B | sandbox id (`Sandbox.connect`) | `sandbox_id` |
+| Modal | sandbox id (`Sandbox.from_id`) | `sandbox_id` |
+| Tensorlake | sandbox id (`client.connect`) | `sandbox_id` |
+| Daytona | sandbox id (`client.get`) | `sandbox_id` |
+| Local, Safehouse | host workdir | `workdir`, env overlay |
+| Ray | — (not supported) | raises `FeatureNotSupportedError` |
 
 ### Snapshots
 
@@ -283,6 +425,58 @@ sb.destroy()
 sb.is_alive       # True/False
 sb.backend_name   # "docker"
 ```
+
+### Reusing a client across many sandboxes
+
+`Sandbox(backend, ...)` builds a fresh provider connection per sandbox. When
+launching many sandboxes on one backend, create a `SandboxClient` once and
+reuse it — provider-level state (the Docker daemon connection, Daytona auth,
+the Ray runtime) is shared across `create()` calls:
+
+```python
+from bespokelabs.sandbox import SandboxClient
+
+client = SandboxClient("docker")
+
+for task in tasks:
+    with client.create(preset="python-data-science") as sb:
+        sb.execute_code(task)
+```
+
+`client.create(...)` accepts the same keyword arguments as `Sandbox(...)`
+and returns a regular `Sandbox` session. `SandboxClient(backend)` validates
+the backend name and SDK availability up front — it raises
+`BackendNotInstalledError` immediately if the backend's extra isn't
+installed — but performs no network I/O until `create()`.
+
+### Async
+
+`AsyncSandboxClient` / `AsyncSandbox` mirror the sync API with coroutine
+methods, so you can create and drive many sandboxes concurrently from one
+event loop:
+
+```python
+import asyncio
+from bespokelabs.sandbox import AsyncSandbox, AsyncSandboxClient
+
+async def run_snippet(client: AsyncSandboxClient, code: str) -> str:
+    async with await client.create(preset="python-data-science") as sb:
+        result = await sb.execute_code(code)
+        return result.stdout
+
+async def main():
+    client = AsyncSandboxClient("daytona")
+    outputs = await asyncio.gather(*(run_snippet(client, c) for c in snippets))
+
+asyncio.run(main())
+```
+
+One-step creation works too: `sb = await AsyncSandbox.create("local")`.
+
+Backend SDKs are synchronous, so async calls are offloaded to worker
+threads — the event loop is never blocked. Note that the missing-SDK check
+(`BackendNotInstalledError`) surfaces at the first `await client.create()`
+rather than at `AsyncSandboxClient(...)` construction, which does no I/O.
 
 ## Feature Support Matrix
 

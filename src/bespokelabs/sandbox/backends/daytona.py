@@ -4,6 +4,7 @@ import math
 import os
 import pathlib
 import shlex
+import threading
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
@@ -14,71 +15,113 @@ from bespokelabs.sandbox.exceptions import (
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
 
 
-class DaytonaAdapter:
-    def __init__(self) -> None:
-        self._client: object = None
-        self._sandbox: object = None
+class DaytonaClient:
+    """Factory for Daytona sandboxes.
 
-    def create(self, config: SandboxConfig) -> None:
+    The authenticated SDK client is built on first create() (reading
+    DAYTONA_* env vars at that point) and reused for every session
+    created through this client.
+    """
+
+    def __init__(self) -> None:
         try:
             from daytona import Daytona, DaytonaConfig  # type: ignore[import-untyped]
-        except ImportError:
+        except ImportError as exc:
             raise BackendNotInstalledError(
                 "Daytona SDK not installed. Run: pip install bespokelabs-sandbox[daytona]"
+            ) from exc
+        self._daytona_cls = Daytona
+        self._daytona_config_cls = DaytonaConfig
+        self._client: object = None
+        # create() may run concurrently (e.g. via AsyncSandboxClient);
+        # guard the one-time authenticated client construction.
+        self._connect_lock = threading.Lock()
+
+    def _ensure_client(self) -> object:
+        if self._client is None:
+            with self._connect_lock:
+                if self._client is None:
+                    api_key = os.environ.get("DAYTONA_API_KEY")
+                    if not api_key:
+                        raise SandboxCreationError("DAYTONA_API_KEY environment variable is not set")
+                    self._client = self._daytona_cls(self._daytona_config_cls(
+                        api_key=api_key,
+                        api_url=os.environ.get("DAYTONA_API_URL", "https://app.daytona.io/api"),
+                        target=os.environ.get("DAYTONA_TARGET", "us"),
+                    ))
+        return self._client
+
+    def resume(self, data: dict) -> DaytonaSession:
+        client = self._ensure_client()
+        getter = getattr(client, "get", None) or getattr(client, "find_one", None)
+        if getter is None:
+            raise FeatureNotSupportedError(
+                "This Daytona SDK version has no get()/find_one(); cannot resume by id"
             )
+        try:
+            sandbox = getter(data["sandbox_id"])
+        except Exception as exc:
+            raise SandboxCreationError(
+                f"Cannot resume Daytona sandbox '{data.get('sandbox_id')}': {exc}"
+            ) from exc
+        return DaytonaSession(client=client, sandbox=sandbox)
 
-        api_key = os.environ.get("DAYTONA_API_KEY")
-        if not api_key:
-            raise SandboxCreationError("DAYTONA_API_KEY environment variable is not set")
-
-        daytona_config = DaytonaConfig(
-            api_key=api_key,
-            api_url=os.environ.get("DAYTONA_API_URL", "https://app.daytona.io/api"),
-            target=os.environ.get("DAYTONA_TARGET", "us"),
-        )
-        self._client = Daytona(daytona_config)
+    def create(self, config: SandboxConfig) -> DaytonaSession:
+        self._ensure_client()
 
         try:
-            params = self._build_params(config)
+            params = _build_params(config)
             if params is not None:
-                self._sandbox = self._client.create(params)
+                sandbox = self._client.create(params)
             else:
-                self._sandbox = self._client.create()
+                sandbox = self._client.create()
         except Exception as exc:
             raise SandboxCreationError(f"Failed to create Daytona sandbox: {exc}") from exc
 
-    @staticmethod
-    def _build_params(config: SandboxConfig) -> object | None:
-        """Build the appropriate Daytona params object for the config."""
-        from daytona import CreateSandboxFromImageParams, CreateSandboxFromSnapshotParams  # type: ignore[import-untyped]
-        from daytona.common.sandbox import Resources  # type: ignore[import-untyped]
+        return DaytonaSession(client=self._client, sandbox=sandbox)
 
-        common: dict = {}
-        if config.env_vars:
-            common["env_vars"] = config.env_vars
 
-        if config.image:
-            # Build resources if non-default cpu or memory is specified
-            resources_kwargs: dict = {}
-            if config.cpu != 1.0:
-                resources_kwargs["cpu"] = max(1, int(config.cpu))
-            if config.memory_mb != 1024:
-                # Daytona SDK expects memory in GiB
-                resources_kwargs["memory"] = math.ceil(config.memory_mb / 1024)
-            if config.disk_mb is not None:
-                # Daytona SDK expects disk in GiB
-                resources_kwargs["disk"] = math.ceil(config.disk_mb / 1024)
+def _build_params(config: SandboxConfig) -> object | None:
+    """Build the appropriate Daytona params object for the config."""
+    from daytona import CreateSandboxFromImageParams, CreateSandboxFromSnapshotParams  # type: ignore[import-untyped]
+    from daytona.common.sandbox import Resources  # type: ignore[import-untyped]
 
-            resources = Resources(**resources_kwargs) if resources_kwargs else None
-            return CreateSandboxFromImageParams(image=config.image, resources=resources, **common)
+    common: dict = {}
+    if config.env_vars:
+        common["env_vars"] = config.env_vars
+    if config.backend_options:
+        common.update(config.backend_options)
 
-        if config.snapshot_id:
-            return CreateSandboxFromSnapshotParams(snapshot=config.snapshot_id, **common)
+    if config.image:
+        # Build resources if non-default cpu or memory is specified
+        resources_kwargs: dict = {}
+        if config.cpu != 1.0:
+            resources_kwargs["cpu"] = max(1, int(config.cpu))
+        if config.memory_mb != 1024:
+            # Daytona SDK expects memory in GiB
+            resources_kwargs["memory"] = math.ceil(config.memory_mb / 1024)
+        if config.disk_mb is not None:
+            # Daytona SDK expects disk in GiB
+            resources_kwargs["disk"] = math.ceil(config.disk_mb / 1024)
 
-        if common:
-            return CreateSandboxFromSnapshotParams(**common)
+        resources = Resources(**resources_kwargs) if resources_kwargs else None
+        return CreateSandboxFromImageParams(image=config.image, resources=resources, **common)
 
-        return None
+    if config.snapshot_id:
+        return CreateSandboxFromSnapshotParams(snapshot=config.snapshot_id, **common)
+
+    if common:
+        return CreateSandboxFromSnapshotParams(**common)
+
+    return None
+
+
+class DaytonaSession:
+    """One live Daytona sandbox."""
+
+    def __init__(self, *, client: object, sandbox: object) -> None:
+        self._client = client
+        self._sandbox: object = sandbox
 
     def execute_code(self, code: str, language: str = "python") -> SandboxResult:
         try:
@@ -150,6 +193,12 @@ class DaytonaAdapter:
         raise FeatureNotSupportedError(
             "Snapshots are not supported by the Daytona backend via this SDK"
         )
+
+    def session_state(self) -> dict:
+        sandbox_id = getattr(self._sandbox, "id", None)
+        if sandbox_id is None:
+            raise FeatureNotSupportedError("Daytona sandbox object exposes no id; cannot serialize")
+        return {"sandbox_id": str(sandbox_id)}
 
     def destroy(self) -> None:
         try:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
 
@@ -18,6 +19,11 @@ class SandboxConfig:
       - snapshot_id: Tensorlake, Modal
       - env_vars: all backends
       - timeout_secs: all backends (local and ray use subprocess timeout)
+      - workdir: Local, Safehouse (host directory used as the sandbox root)
+      - backend_options: provider-specific escape hatch, merged last into the
+        backend's underlying create call (Docker containers.run, Modal
+        Sandbox.create, E2B Sandbox.create, Tensorlake create_and_connect,
+        Daytona create params). Ignored by local/safehouse/ray.
     """
 
     backend: str
@@ -32,6 +38,7 @@ class SandboxConfig:
     template: str | None = None
     snapshot_id: str | None = None
     workdir: str | None = None
+    backend_options: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -59,3 +66,26 @@ class SnapshotInfo:
     snapshot_id: str
     backend: str
     created_at: str | None = None
+
+
+@dataclass
+class SandboxSessionState:
+    """Serializable handle to a *running* sandbox.
+
+    Produced by Sandbox.session_state() and consumed by
+    SandboxClient.resume() / Sandbox.resume(), including from another
+    process.  ``data`` is a backend-specific JSON-safe payload (e.g. a
+    container or sandbox id).  Unlike a snapshot, this does not save
+    state — it reattaches to a sandbox that is still alive.
+    """
+
+    backend: str
+    data: dict
+
+    def to_json(self) -> str:
+        return json.dumps({"backend": self.backend, "data": self.data})
+
+    @classmethod
+    def from_json(cls, raw: str) -> SandboxSessionState:
+        obj = json.loads(raw)
+        return cls(backend=obj["backend"], data=obj["data"])

@@ -3,30 +3,47 @@ from __future__ import annotations
 import base64
 import pathlib
 import shlex
+import threading
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
+    FeatureNotSupportedError,
     SandboxCreationError,
     SandboxExecutionError,
 )
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
 
 
-class TensorlakeAdapter:
-    def __init__(self) -> None:
-        self._client: object = None
-        self._sandbox: object = None
+class TensorlakeClient:
+    """Factory for Tensorlake sandboxes.
 
-    def create(self, config: SandboxConfig) -> None:
+    The Tensorlake SDK client is built on first create() and reused for
+    every session created through this client.
+    """
+
+    def __init__(self) -> None:
         try:
-            from tensorlake.sandbox import SandboxClient  # type: ignore[import-untyped]
-        except ImportError:
+            from tensorlake.sandbox import SandboxClient as TensorlakeSandboxClient  # type: ignore[import-untyped]
+        except ImportError as exc:
             raise BackendNotInstalledError(
                 "Tensorlake SDK not installed. Run: pip install bespokelabs-sandbox[tensorlake]"
-            )
+            ) from exc
+        self._client_cls = TensorlakeSandboxClient
+        self._client: object = None
+        # create() may run concurrently (e.g. via AsyncSandboxClient);
+        # guard the one-time SDK client construction.
+        self._connect_lock = threading.Lock()
 
+    def _ensure_client(self) -> object:
+        if self._client is None:
+            with self._connect_lock:
+                if self._client is None:
+                    self._client = self._client_cls()
+        return self._client
+
+    def create(self, config: SandboxConfig) -> TensorlakeSession:
         try:
-            self._client = SandboxClient()
+            client = self._ensure_client()
             kwargs: dict = {
                 "cpus": config.cpu,
                 "memory_mb": config.memory_mb,
@@ -37,9 +54,36 @@ class TensorlakeAdapter:
                 kwargs["image"] = config.image
             if config.snapshot_id:
                 kwargs["snapshot_id"] = config.snapshot_id
-            self._sandbox = self._client.create_and_connect(**kwargs)
+            if config.backend_options:
+                kwargs.update(config.backend_options)
+            sandbox = client.create_and_connect(**kwargs)
         except Exception as exc:
             raise SandboxCreationError(f"Failed to create Tensorlake sandbox: {exc}") from exc
+
+        return TensorlakeSession(client=client, sandbox=sandbox)
+
+    def resume(self, data: dict) -> TensorlakeSession:
+        client = self._ensure_client()
+        connect = getattr(client, "connect", None)
+        if connect is None:
+            raise FeatureNotSupportedError(
+                "This Tensorlake SDK version has no connect(); cannot resume by id"
+            )
+        try:
+            sandbox = connect(data["sandbox_id"])
+        except Exception as exc:
+            raise SandboxCreationError(
+                f"Cannot resume Tensorlake sandbox '{data.get('sandbox_id')}': {exc}"
+            ) from exc
+        return TensorlakeSession(client=client, sandbox=sandbox)
+
+
+class TensorlakeSession:
+    """One live Tensorlake sandbox."""
+
+    def __init__(self, *, client: object, sandbox: object) -> None:
+        self._client = client
+        self._sandbox: object = sandbox
 
     def execute_code(self, code: str, language: str = "python") -> SandboxResult:
         try:
@@ -132,6 +176,9 @@ class TensorlakeAdapter:
             )
         except Exception as exc:
             raise SandboxExecutionError(f"Tensorlake snapshot failed: {exc}") from exc
+
+    def session_state(self) -> dict:
+        return {"sandbox_id": str(self._sandbox.sandbox_id)}
 
     def destroy(self) -> None:
         try:

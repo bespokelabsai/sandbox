@@ -20,7 +20,42 @@ from bespokelabs.sandbox.exceptions import (
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
 
 
-class LocalAdapter:
+class LocalClient:
+    """Factory for local subprocess sandboxes. Stateless — nothing to connect to."""
+
+    def create(self, config: SandboxConfig) -> LocalSession:
+        try:
+            if config.workdir:
+                workdir = os.path.abspath(config.workdir)
+                os.makedirs(workdir, exist_ok=True)
+                owns_workdir = False
+            else:
+                workdir = tempfile.mkdtemp(prefix="sandbox_local_")
+                owns_workdir = True
+            return LocalSession(
+                workdir=workdir,
+                owns_workdir=owns_workdir,
+                timeout=config.timeout_secs,
+                env_overlay=config.env_vars or {},
+            )
+        except Exception as exc:
+            raise SandboxCreationError(f"Failed to create local sandbox: {exc}") from exc
+
+    def resume(self, data: dict) -> LocalSession:
+        workdir = data.get("workdir")
+        if not workdir or not os.path.isdir(workdir):
+            raise SandboxCreationError(
+                f"Cannot resume local sandbox: workdir '{workdir}' does not exist"
+            )
+        return LocalSession(
+            workdir=workdir,
+            owns_workdir=bool(data.get("owns_workdir", False)),
+            timeout=int(data.get("timeout", 600)),
+            env_overlay=data.get("env_vars") or {},
+        )
+
+
+class LocalSession:
     """Sandbox backed by local subprocess execution in a temp directory.
 
     No external dependencies, no Docker, no API keys.
@@ -35,27 +70,16 @@ class LocalAdapter:
     write_file("/hello.txt", ...).
     """
 
-    def __init__(self) -> None:
-        self._workdir: str | None = None
-        self._timeout: int = 600
-        self._env: dict[str, str] | None = None
-        self._owns_workdir: bool = True
-
-    def create(self, config: SandboxConfig) -> None:
-        try:
-            if config.workdir:
-                self._workdir = os.path.abspath(config.workdir)
-                os.makedirs(self._workdir, exist_ok=True)
-                self._owns_workdir = False
-            else:
-                self._workdir = tempfile.mkdtemp(prefix="sandbox_local_")
-                self._owns_workdir = True
-            self._timeout = config.timeout_secs
-            self._env = {**os.environ, **(config.env_vars or {})}
-            self._env["SANDBOX_ROOT"] = self._workdir
-            self._env["HOME"] = self._workdir
-        except Exception as exc:
-            raise SandboxCreationError(f"Failed to create local sandbox: {exc}") from exc
+    def __init__(self, *, workdir: str, owns_workdir: bool, timeout: int, env_overlay: dict[str, str]) -> None:
+        self._workdir: str | None = workdir
+        self._owns_workdir = owns_workdir
+        self._timeout = timeout
+        # Only the caller-provided overlay is kept for session_state();
+        # the merged environment would serialize the whole host environ.
+        self._env_overlay = env_overlay
+        self._env = {**os.environ, **env_overlay}
+        self._env["SANDBOX_ROOT"] = workdir
+        self._env["HOME"] = workdir
 
     def execute_code(self, code: str, language: str = "python") -> SandboxResult:
         resolved = self._resolve_interpreter(language)
@@ -187,6 +211,14 @@ class LocalAdapter:
         raise FeatureNotSupportedError(
             "Snapshots are not supported by the local backend"
         )
+
+    def session_state(self) -> dict:
+        return {
+            "workdir": self._workdir,
+            "owns_workdir": self._owns_workdir,
+            "timeout": self._timeout,
+            "env_vars": self._env_overlay,
+        }
 
     def destroy(self) -> None:
         try:

@@ -5,7 +5,7 @@ name: Build and push preset images
 #   * Push to main  -> build+push :main (mutable dev tag). Library code
 #     never references :main; it exists for manual testing.
 #
-#   * workflow_dispatch -> build+push a pinned, immutable tag (e.g. :v1)
+#   * workflow_dispatch -> build+push a pinned, immutable tag (e.g. :v2)
 #     matching PRESET_IMAGE_TAG in src/bespokelabs/sandbox/presets.py.
 #     This is how you cut a new image release: bump the constant in
 #     Python, then run this workflow with the same tag value.
@@ -24,9 +24,9 @@ on:
         required: false
         default: "all"
       tag:
-        description: "Pinned tag to publish (e.g. v1). Must match PRESET_IMAGE_TAG."
+        description: "Pinned tag to publish (e.g. v2). Must match PRESET_IMAGE_TAG."
         required: true
-        default: "v1"
+        default: "v2"
 
 env:
   REGISTRY: ghcr.io
@@ -88,7 +88,7 @@ jobs:
         id: meta
         with:
           images: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
-          # On workflow_dispatch -> the pinned tag input (e.g. :v1).
+          # On workflow_dispatch -> the pinned tag input (e.g. :v2).
           # On push to main     -> :main (dev tag, never referenced by library).
           # Always emit :sha-<short> for auditability.
           tags: |
