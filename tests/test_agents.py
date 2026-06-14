@@ -2,27 +2,37 @@ from __future__ import annotations
 
 import unittest
 
-from bespokelabs.sandbox import AgentSpec, Sandbox, SandboxError
+from bespokelabs.sandbox import AgentSpec, ExternalAgentSpec, InsideAgentSpec, Sandbox, SandboxError
 from bespokelabs.sandbox.types import SandboxResult
 
 
 class AgentSpecTests(unittest.TestCase):
     def test_inside_requires_command(self) -> None:
         with self.assertRaises(ValueError):
-            AgentSpec(name="empty", placement="inside", command=[])
+            InsideAgentSpec(name="empty", command=[])
 
-    def test_external_rejects_inside_command(self) -> None:
-        with self.assertRaises(ValueError):
-            AgentSpec(name="bad", placement="external", command=["echo"])
+    def test_direct_agent_spec_constructor_is_factory_only(self) -> None:
+        with self.assertRaises(TypeError):
+            AgentSpec()
 
     def test_unknown_capability_raises(self) -> None:
         with self.assertRaises(ValueError):
-            AgentSpec.external(name="agent", capabilities=["database"])  # type: ignore[list-item]
+            ExternalAgentSpec(name="agent", capabilities=["database"])  # type: ignore[list-item]
 
-    def test_inside_spec_has_no_preset_field(self) -> None:
+    def test_inside_factory_returns_inside_spec(self) -> None:
         spec = AgentSpec.inside(name="python", command=["python3", "-c", "print('ok')"])
 
+        self.assertIsInstance(spec, InsideAgentSpec)
+        self.assertEqual(spec.placement, "inside")
         self.assertFalse(hasattr(spec, "preset"))
+        self.assertFalse(hasattr(spec, "runner"))
+
+    def test_external_factory_returns_external_spec(self) -> None:
+        spec = AgentSpec.external(name="external", capabilities=["files"])
+
+        self.assertIsInstance(spec, ExternalAgentSpec)
+        self.assertEqual(spec.placement, "external")
+        self.assertFalse(hasattr(spec, "command"))
 
 
 class InsideAgentSessionTests(unittest.TestCase):
