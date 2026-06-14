@@ -5,7 +5,12 @@ import shlex
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
-from bespokelabs.sandbox.backends._prelude import PYTHON_PREAMBLE, is_python_language
+from bespokelabs.sandbox.backends._prelude import (
+    PYTHON_PREAMBLE,
+    SHELL_PRELUDE,
+    is_python_language,
+    rewrite_redirects,
+)
 from bespokelabs.sandbox.exceptions import SandboxError
 from bespokelabs.sandbox.types import FileInfo, SandboxResult
 
@@ -148,7 +153,7 @@ class AgentContext:
         self._sandbox.write_file(patch_path, patch)
         patch_arg = shlex.quote(f"-p{strip}")
         patch_file = _shell_path(patch_path)
-        return self._sandbox.execute_command("bash", ["-lc", f"patch {patch_arg} < {patch_file}"])
+        return self._sandbox.execute_command("bash", ["-c", f"patch {patch_arg} < {patch_file}"])
 
     def _require(self, capability: AgentCapability) -> None:
         if capability not in self._capabilities:
@@ -196,7 +201,7 @@ class AgentSession:
             return self._sandbox.execute_command(command[0], command[1:] or None)
 
         script = self._build_shell_script(prompt)
-        return self._sandbox.execute_command("bash", ["-lc", script])
+        return self._sandbox.execute_command("bash", ["-c", script])
 
     def _build_shell_script(self, prompt: str) -> str:
         command = _prepare_inside_command(self._spec.command or [])
@@ -234,6 +239,8 @@ def _prepare_inside_command(command: list[str]) -> list[str]:
     if len(command) < 3:
         return command
     executable = command[0].rsplit("/", 1)[-1]
+    if executable in ("bash", "sh", "zsh"):
+        return _prepare_inline_shell_command(command)
     if not is_python_language(executable):
         return command
     try:
@@ -244,6 +251,26 @@ def _prepare_inside_command(command: list[str]) -> list[str]:
         return command
     command[code_index] = PYTHON_PREAMBLE + command[code_index]
     return command
+
+
+def _prepare_inline_shell_command(command: list[str]) -> list[str]:
+    command = list(command)
+    code_index = _shell_code_index(command)
+    if code_index is None:
+        return command
+    command[code_index] = SHELL_PRELUDE + rewrite_redirects(command[code_index])
+    return command
+
+
+def _shell_code_index(command: list[str]) -> int | None:
+    for index, arg in enumerate(command[1:], start=1):
+        if not (arg == "-c" or (arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:])):
+            continue
+        code_index = index + 1
+        if code_index < len(command):
+            return code_index
+        return None
+    return None
 
 
 def _shell_arg(value: str, *, is_command: bool = False) -> str:

@@ -127,6 +127,21 @@ class InsideAgentSessionTests(unittest.TestCase):
             self.assertEqual(result.exit_code, 0)
             self.assertEqual(result.stdout.strip(), "ok")
 
+    def test_inside_agent_wrapper_rebases_nested_shell_absolute_paths(self) -> None:
+        with Sandbox("local") as sb:
+            sb.write_file("/hello.txt", "sandbox")
+            agent = sb.agent(AgentSpec.inside(
+                name="nested-shell",
+                command=["bash", "-c", "cat /hello.txt"],
+                env={"FORCE_WRAPPER": "1"},
+                input_mode="none",
+            ))
+
+            result = agent.run("ignored")
+
+            self.assertEqual(result.exit_code, 0)
+            self.assertEqual(result.stdout.strip(), "sandbox")
+
 
 class ExternalAgentSessionTests(unittest.TestCase):
     def test_external_agent_runner_receives_context(self) -> None:
