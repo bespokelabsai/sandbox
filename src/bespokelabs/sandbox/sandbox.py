@@ -7,6 +7,7 @@ import shlex
 import typing
 from typing import TypeVar, overload
 
+from bespokelabs.sandbox.agents import AgentCapability, AgentContext, AgentSession, AgentSpec
 from bespokelabs.sandbox.backends import BACKENDS
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
@@ -270,6 +271,22 @@ class Sandbox:
             backend=self._config.backend,
             data=self._session.session_state(),
         )
+
+    # -- Agent helpers -----------------------------------------------------
+
+    def agent(self, spec: AgentSpec) -> AgentSession:
+        """Bind an agent spec to this sandbox.
+
+        The returned AgentSession is additive: the Sandbox remains the core
+        object for command execution, files, snapshots, and lifecycle.
+        """
+        self._check_alive()
+        return AgentSession(self, spec)
+
+    def agent_tools(self, capabilities: list[AgentCapability] | None = None) -> AgentContext:
+        """Return a capability-checked context for an external agent."""
+        self._check_alive()
+        return AgentContext(self, capabilities)
 
     @classmethod
     def resume(cls, state: SandboxSessionState) -> Sandbox:
