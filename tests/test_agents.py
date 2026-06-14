@@ -89,6 +89,26 @@ class InsideAgentSessionTests(unittest.TestCase):
             self.assertEqual(result.exit_code, 0)
             self.assertEqual(result.stdout.strip(), "from launch plumbing")
 
+    def test_inside_agent_file_input_with_cwd_uses_written_path(self) -> None:
+        with Sandbox("local") as sb:
+            sb.write_file("/workspace/prompt.txt", "wrong path")
+            agent = sb.agent(AgentSpec.inside(
+                name="file-reader",
+                command=[
+                    "python3",
+                    "-c",
+                    "import pathlib, sys; print(pathlib.Path(sys.argv[1]).read_text().strip())",
+                ],
+                cwd="/workspace",
+                input_mode="file",
+                input_path="prompt.txt",
+            ))
+
+            result = agent.run("right path")
+
+            self.assertEqual(result.exit_code, 0)
+            self.assertEqual(result.stdout.strip(), "right path")
+
     def test_inside_agent_honors_env_and_cwd(self) -> None:
         with Sandbox("local") as sb:
             sb.write_file("/workspace/marker.txt", "ok")

@@ -186,24 +186,25 @@ class AgentSession:
     def _run_inside(self, prompt: str) -> SandboxResult:
         command = _prepare_inside_command(self._spec.command or [])
         mode = self._spec.input_mode
+        input_path = _normalize_sandbox_path(self._spec.input_path)
 
         if mode == "file":
-            self._sandbox.write_file(self._spec.input_path, prompt)
+            self._sandbox.write_file(input_path, prompt)
 
         needs_shell = bool(self._spec.cwd or self._spec.env or mode == "stdin")
         if not needs_shell:
             if mode == "argv":
                 command = [*command, prompt]
             elif mode == "file":
-                command = [*command, self._spec.input_path]
+                command = [*command, input_path]
             elif mode != "none":
                 raise SandboxError(f"Unsupported inside agent input_mode: {mode}")
             return self._sandbox.execute_command(command[0], command[1:] or None)
 
-        script = self._build_shell_script(prompt)
+        script = self._build_shell_script(prompt, input_path=input_path)
         return self._sandbox.execute_command("bash", ["-c", script])
 
-    def _build_shell_script(self, prompt: str) -> str:
+    def _build_shell_script(self, prompt: str, *, input_path: str) -> str:
         command = _prepare_inside_command(self._spec.command or [])
         lines = ["set -e"]
         if self._spec.env:
@@ -219,7 +220,7 @@ class AgentSession:
         elif mode == "argv":
             lines.append(f"{command_line} {shlex.quote(prompt)}")
         elif mode == "file":
-            lines.append(f"{command_line} {_shell_path(self._spec.input_path)}")
+            lines.append(f"{command_line} {_shell_path(input_path)}")
         elif mode == "none":
             lines.append(command_line)
         else:
@@ -251,6 +252,12 @@ def _prepare_inside_command(command: list[str]) -> list[str]:
         return command
     command[code_index] = PYTHON_PREAMBLE + command[code_index]
     return command
+
+
+def _normalize_sandbox_path(path: str) -> str:
+    if path.startswith("/"):
+        return path
+    return "/" + path
 
 
 def _prepare_inline_shell_command(command: list[str]) -> list[str]:
