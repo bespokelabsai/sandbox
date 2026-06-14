@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       image:
-        description: "Specific image to build (e.g. claude-sdk), or 'all'"
+        description: "Specific image to build (e.g. codex), or 'all'"
         required: false
         default: "all"
       tag:

@@ -212,7 +212,8 @@ sb.download_file("/home/user/results.json", "./results.json")
 ### Presets
 
 Presets are predefined sandbox configurations with setup commands that run after creation.
-Presets that install tools with `npm`, such as `codex`, `claude-code`, and `web-dev`, assume the sandbox image already includes Node.js and `npm`.
+The built-in presets are intentionally focused on agent CLIs: `codex` and `claude-code`.
+Both assume the sandbox image already includes Node.js and `npm` when setup commands are used as a fallback.
 
 ```python
 # Sandbox with Codex CLI installed
@@ -222,10 +223,6 @@ with Sandbox("docker", preset="codex") as sb:
 # Sandbox with Claude Code installed
 with Sandbox("docker", preset="claude-code") as sb:
     sb.execute_command("claude --version")
-
-# Python data science stack
-with Sandbox("e2b", preset="python-data-science") as sb:
-    sb.execute_code("import pandas as pd; print(pd.__version__)")
 ```
 
 Built-in presets:
@@ -234,11 +231,6 @@ Built-in presets:
 |---|---|---|
 | `claude-code` | `@anthropic-ai/claude-code` via npm | 2GB RAM, 30min timeout |
 | `codex` | `@openai/codex` via npm | 2GB RAM, 30min timeout |
-| `python-data-science` | numpy, pandas, matplotlib, scikit-learn | 2GB RAM |
-| `python-ml` | torch, transformers, datasets, accelerate | 2 vCPU, 4GB RAM, 30min timeout |
-| `node` | Verifies node/npm are present | defaults |
-| `web-dev` | typescript, ts-node, prettier, eslint | 2GB RAM |
-| `empty` | Nothing | defaults |
 
 Create your own:
 

@@ -67,7 +67,7 @@ with Sandbox("docker", git_repo="https://github.com/acme/project") as sb:
 External-driver shape:
 
 ```python
-with Sandbox("docker", preset="python-data-science") as sb:
+with Sandbox("docker", image="python:3.12-slim") as sb:
     tools = sb.agent_tools(capabilities=["shell", "files", "patch"])
     result = my_agent.run("Inspect the dataset and run inference", tools=tools)
 ```
@@ -162,4 +162,3 @@ When adding agent features:
 - Preserve direct eval and inference use cases.
 - Keep Curator-style usage working without changes.
 - Prefer small adapter layers over importing large agent frameworks in core.
-

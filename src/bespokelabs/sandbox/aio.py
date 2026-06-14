@@ -11,7 +11,7 @@ Usage:
 
     async def main():
         client = AsyncSandboxClient("docker")
-        async with await client.create(preset="python-data-science") as sb:
+        async with await client.create(image="python:3.12-slim") as sb:
             result = await sb.execute_code('print("hello")')
             print(result.stdout)
 
