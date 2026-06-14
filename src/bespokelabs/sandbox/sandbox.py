@@ -411,7 +411,7 @@ class SandboxClient:
 
         client = SandboxClient("docker")
         for task in tasks:
-            with client.create(preset="python-data-science") as sb:
+            with client.create(image="python:3.12-slim") as sb:
                 sb.execute_code(task)
 
     ``Sandbox(backend, ...)`` remains the one-step shorthand for

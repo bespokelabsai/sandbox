@@ -245,24 +245,24 @@ runtime boundary visible.
 ### Presets
 
 Presets are predefined sandbox configurations with setup commands that run after creation.
-Presets that install tools with `npm`, such as `codex`, `claude-code`, and `web-dev`, assume the sandbox image already includes Node.js and `npm`.
+The built-in presets are intentionally focused on agent CLIs: `codex` and `claude-code`.
+Both assume the sandbox image already includes Node.js and `npm` when setup commands are used as a fallback.
 
 #### Prebuilt Preset Images
 
-Most built-in presets also have prebuilt OCI images published to GitHub Container Registry:
+Built-in presets have prebuilt OCI images published to GitHub Container Registry:
 
 ```text
 ghcr.io/bespokelabsai/sandbox/<preset>:v2
 ```
 
-Docker, Daytona, and Modal use these images automatically when you pass a preset, then skip the preset's setup commands because the tools and Python packages are already baked into the image.
+Docker, Daytona, and Modal use these images automatically when you pass a preset, then skip the preset's setup commands because the tools are already baked into the image.
 
 The main advantage is that prebuilt images move setup work from sandbox startup time to image build time:
 
 - Sandboxes start faster because they do not reinstall the same tools for every run.
 - Startup is more reliable because it depends less on package registry availability during sandbox creation.
 - Preset environments are more reproducible because images use pinned tags instead of a moving `latest` tag.
-- Heavy presets such as `python-ml`, `python-data-science`, `codex`, and `claude-code` are practical to create repeatedly.
 
 For example, this Docker sandbox starts from `ghcr.io/bespokelabsai/sandbox/codex:v2` and does not run `npm install -g @openai/codex` at startup:
 
@@ -288,72 +288,14 @@ with Sandbox("docker", preset="codex") as sb:
 # Sandbox with Claude Code installed
 with Sandbox("docker", preset="claude-code") as sb:
     sb.execute_command("claude --version")
-
-# Python data science stack
-with Sandbox("e2b", preset="python-data-science") as sb:
-    sb.execute_code("import pandas as pd; print(pd.__version__)")
 ```
 
 Built-in presets:
 
-**Agents**
-
 | Preset | What it installs | Defaults |
 |---|---|---|
 | `claude-code` | `@anthropic-ai/claude-code` via npm | 2GB RAM, 30min timeout |
-| `claude-sdk` | Claude Agent SDK + bundled Claude Code CLI | 2GB RAM, 30min timeout |
 | `codex` | `@openai/codex` via npm | 2GB RAM, 30min timeout |
-
-**Language runtimes**
-
-| Preset | What it installs | Defaults |
-|---|---|---|
-| `node` | Node.js 20 LTS + typescript, ts-node, pnpm, yarn | 2GB RAM |
-| `web-dev` | Node.js + typescript, ts-node, prettier, eslint | 2GB RAM |
-| `go` | Go 1.22 toolchain | 2GB RAM |
-| `rust` | Rust + clippy, rustfmt | 2GB RAM |
-| `java` | Java 21 (Temurin) + Maven, Gradle | 2GB RAM |
-| `ruby` | Ruby 3.3 + bundler, rake | defaults |
-| `php` | PHP 8.3 + Composer | defaults |
-| `dotnet` | .NET 8.0 SDK | 2GB RAM |
-| `cpp` | gcc 13 + cmake, ninja, clang, gdb | 2GB RAM |
-| `r` | R 4.4.1 + data.table, ggplot2, dplyr, jsonlite | 2GB RAM |
-
-**Machine learning / AI**
-
-| Preset | What it installs | Defaults |
-|---|---|---|
-| `python-data-science` | numpy, pandas, matplotlib, scikit-learn | 2GB RAM |
-| `python-ml` | torch, transformers, datasets, accelerate | 2 vCPU, 4GB RAM, 30min timeout |
-| `pytorch` | torch, torchvision, torchaudio (CPU) | 2 vCPU, 4GB RAM, 30min timeout |
-| `tensorflow` | tensorflow-cpu | 2 vCPU, 4GB RAM, 30min timeout |
-| `huggingface` | transformers, datasets, accelerate, hub, safetensors | 2 vCPU, 4GB RAM, 30min timeout |
-| `nlp` | spaCy + NLTK (en_core_web_sm, common corpora) | 2GB RAM, 30min timeout |
-| `llm` | openai, anthropic, langchain, tiktoken, tenacity | 2GB RAM |
-| `scientific` | numpy, scipy, sympy, networkx, statsmodels | 2GB RAM |
-
-**Web / scraping / browser**
-
-| Preset | What it installs | Defaults |
-|---|---|---|
-| `scraping` | requests, httpx, beautifulsoup4, lxml, parsel, scrapy | 2GB RAM |
-| `playwright` | Playwright + browsers | 2 vCPU, 4GB RAM, 30min timeout |
-| `selenium` | selenium, webdriver-manager + headless Chromium | 2 vCPU, 2GB RAM, 30min timeout |
-| `fastapi` | fastapi, uvicorn, pydantic, httpx | 2GB RAM |
-
-**Data / documents / media**
-
-| Preset | What it installs | Defaults |
-|---|---|---|
-| `dataeng` | polars, duckdb, pyarrow, sqlalchemy | 4GB RAM |
-| `pdf` | pypdf, pdfplumber, reportlab, pdf2image + poppler | 2GB RAM |
-| `image` | pillow, opencv-headless, scikit-image, numpy | 2GB RAM |
-
-**Other**
-
-| Preset | What it installs | Defaults |
-|---|---|---|
-| `empty` | Nothing | defaults |
 
 Create your own:
 
@@ -385,8 +327,8 @@ setup commands run.
 ```python
 with Sandbox(
     "docker",
-    preset="python-data-science",
-    files={"/work/run.py": "import pandas as pd; print(pd.__version__)"},
+    image="python:3.12-slim",
+    files={"/work/run.py": "print('ready')"},
 ) as sb:
     print(sb.execute_command("python", ["/work/run.py"]).stdout)
 ```
@@ -505,7 +447,7 @@ from bespokelabs.sandbox import SandboxClient
 client = SandboxClient("docker")
 
 for task in tasks:
-    with client.create(preset="python-data-science") as sb:
+    with client.create(image="python:3.12-slim") as sb:
         sb.execute_code(task)
 ```
 
@@ -526,7 +468,7 @@ import asyncio
 from bespokelabs.sandbox import AsyncSandbox, AsyncSandboxClient
 
 async def run_snippet(client: AsyncSandboxClient, code: str) -> str:
-    async with await client.create(preset="python-data-science") as sb:
+    async with await client.create(image="python:3.12-slim") as sb:
         result = await sb.execute_code(code)
         return result.stdout
 
