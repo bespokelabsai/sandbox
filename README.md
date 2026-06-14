@@ -194,12 +194,12 @@ from bespokelabs.sandbox import AgentSpec, Sandbox
 with Sandbox(
     "docker",
     preset="codex",
-    git_repo="https://github.com/acme/project",
+    git_repo="https://github.com/bespokelabsai/sandbox",
 ) as sb:
     agent = sb.agent(AgentSpec.inside(
         name="codex",
         command=["codex", "exec"],
-        cwd="/project",
+        cwd="/sandbox",
     ))
 
     result = agent.run("Run the eval suite and summarize failures")
@@ -296,6 +296,63 @@ Built-in presets:
 |---|---|---|
 | `claude-code` | `@anthropic-ai/claude-code` via npm | 2GB RAM, 30min timeout |
 | `codex` | `@openai/codex` via npm | 2GB RAM, 30min timeout |
+
+#### Non-interactive web access
+
+The preset controls which CLI is installed in the sandbox. It does not grant
+the CLI permission to use its own web tools. When you run an agent inside a
+remote sandbox such as Daytona, preconfigure the CLI for non-interactive runs
+instead of waiting for an in-terminal approval prompt.
+
+For Claude Code, `WebFetch` and `WebSearch` are permission-gated tools. Use
+`--permission-mode dontAsk` with the narrowest `--allowedTools` entries that
+fit the task:
+
+```python
+agent = sb.agent(AgentSpec.inside(
+    name="claude",
+    command=[
+        "claude",
+        "-p",
+        "--permission-mode",
+        "dontAsk",
+        "--allowedTools",
+        "WebFetch(domain:github.com)",
+        "WebSearch",
+    ],
+    input_mode="argv",
+))
+
+result = agent.run("Summarize https://github.com/bespokelabsai/sandbox")
+```
+
+For Codex CLI, use `codex exec` with explicit approval, sandbox, and search
+settings. For read-only website summaries, keep the Codex sandbox read-only,
+disable approval prompts, and enable live search:
+
+```python
+agent = sb.agent(AgentSpec.inside(
+    name="codex",
+    command=[
+        "codex",
+        "exec",
+        "--ask-for-approval",
+        "never",
+        "--sandbox",
+        "read-only",
+        "--search",
+    ],
+    input_mode="argv",
+))
+
+result = agent.run("Summarize https://github.com/bespokelabsai/sandbox")
+```
+
+Use broader modes only when the outer sandbox is the trust boundary. For
+example, `codex exec --sandbox workspace-write --ask-for-approval never` lets
+Codex edit files without pausing, and Claude Code's `--permission-mode
+bypassPermissions` skips most permission prompts. Those modes are best kept to
+isolated sandboxes with scoped credentials.
 
 Create your own:
 
