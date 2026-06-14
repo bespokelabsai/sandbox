@@ -194,12 +194,12 @@ from bespokelabs.sandbox import AgentSpec, Sandbox
 with Sandbox(
     "docker",
     preset="codex",
-    git_repo="https://github.com/acme/project",
+    git_repo="https://github.com/bespokelabsai/sandbox",
 ) as sb:
     agent = sb.agent(AgentSpec.inside(
         name="codex",
         command=["codex", "exec"],
-        cwd="/project",
+        cwd="/sandbox",
     ))
 
     result = agent.run("Run the eval suite and summarize failures")
@@ -323,7 +323,7 @@ agent = sb.agent(AgentSpec.inside(
     input_mode="argv",
 ))
 
-result = agent.run("Summarize https://github.com/acme/project")
+result = agent.run("Summarize https://github.com/bespokelabsai/sandbox")
 ```
 
 For Codex CLI, use `codex exec` with explicit approval, sandbox, and search
@@ -345,7 +345,7 @@ agent = sb.agent(AgentSpec.inside(
     input_mode="argv",
 ))
 
-result = agent.run("Summarize https://github.com/acme/project")
+result = agent.run("Summarize https://github.com/bespokelabsai/sandbox")
 ```
 
 Use broader modes only when the outer sandbox is the trust boundary. For
