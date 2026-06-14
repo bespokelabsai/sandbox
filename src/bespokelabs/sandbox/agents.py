@@ -5,6 +5,7 @@ import shlex
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
+from bespokelabs.sandbox.backends._prelude import PYTHON_PREAMBLE, is_python_language
 from bespokelabs.sandbox.exceptions import SandboxError
 from bespokelabs.sandbox.types import FileInfo, SandboxResult
 
@@ -37,7 +38,6 @@ class AgentSpec:
 
     # inside-only fields
     command: list[str] | None = None
-    preset: str | None = None
     cwd: str | None = None
     input_mode: AgentInputMode = "stdin"
     input_path: str = "/tmp/agent-input.txt"
@@ -58,7 +58,6 @@ class AgentSpec:
         *,
         name: str,
         command: list[str],
-        preset: str | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         input_mode: AgentInputMode = "stdin",
@@ -70,7 +69,6 @@ class AgentSpec:
             name=name,
             placement="inside",
             command=command,
-            preset=preset,
             cwd=cwd,
             env=env or {},
             input_mode=input_mode,
@@ -181,7 +179,7 @@ class AgentSession:
         return self._run_inside(prompt)
 
     def _run_inside(self, prompt: str) -> SandboxResult:
-        command = self._spec.command or []
+        command = _prepare_inside_command(self._spec.command or [])
         mode = self._spec.input_mode
 
         if mode == "file":
@@ -201,6 +199,7 @@ class AgentSession:
         return self._sandbox.execute_command("bash", ["-lc", script])
 
     def _build_shell_script(self, prompt: str) -> str:
+        command = _prepare_inside_command(self._spec.command or [])
         lines = ["set -e"]
         if self._spec.env:
             for key, value in self._spec.env.items():
@@ -208,7 +207,6 @@ class AgentSession:
         if self._spec.cwd:
             lines.append(f"cd {_shell_path(self._spec.cwd)}")
 
-        command = self._spec.command or []
         command_line = " ".join(_shell_arg(part, is_command=(idx == 0)) for idx, part in enumerate(command))
         mode = self._spec.input_mode
         if mode == "stdin":
@@ -222,6 +220,30 @@ class AgentSession:
         else:
             raise SandboxError(f"Unsupported inside agent input_mode: {mode}")
         return "\n".join(lines)
+
+
+def _prepare_inside_command(command: list[str]) -> list[str]:
+    """Prepare an inside-agent command without changing the user's spec.
+
+    Local-style backends need the same Python path rebasing used by
+    execute_code(). For inline Python commands, inject the preamble into the
+    `-c` payload. On container/cloud backends SANDBOX_ROOT is unset, so the
+    preamble exits without rebasing.
+    """
+    command = list(command)
+    if len(command) < 3:
+        return command
+    executable = command[0].rsplit("/", 1)[-1]
+    if not is_python_language(executable):
+        return command
+    try:
+        code_index = command.index("-c") + 1
+    except ValueError:
+        return command
+    if code_index >= len(command):
+        return command
+    command[code_index] = PYTHON_PREAMBLE + command[code_index]
+    return command
 
 
 def _shell_arg(value: str, *, is_command: bool = False) -> str:

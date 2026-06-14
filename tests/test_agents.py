@@ -19,6 +19,11 @@ class AgentSpecTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             AgentSpec.external(name="agent", capabilities=["database"])  # type: ignore[list-item]
 
+    def test_inside_spec_has_no_preset_field(self) -> None:
+        spec = AgentSpec.inside(name="python", command=["python3", "-c", "print('ok')"])
+
+        self.assertFalse(hasattr(spec, "preset"))
+
 
 class InsideAgentSessionTests(unittest.TestCase):
     def test_inside_agent_argv_input(self) -> None:
@@ -103,6 +108,24 @@ class InsideAgentSessionTests(unittest.TestCase):
 
             self.assertEqual(result.exit_code, 0)
             self.assertEqual(result.stdout.strip(), "runner ok")
+
+    def test_inside_agent_inline_python_rebases_absolute_paths(self) -> None:
+        with Sandbox("local") as sb:
+            sb.write_file("/workspace/marker.txt", "ok")
+            agent = sb.agent(AgentSpec.inside(
+                name="absolute-path-python",
+                command=[
+                    "python3",
+                    "-c",
+                    "import pathlib; print(pathlib.Path('/workspace/marker.txt').read_text())",
+                ],
+                input_mode="none",
+            ))
+
+            result = agent.run("ignored")
+
+            self.assertEqual(result.exit_code, 0)
+            self.assertEqual(result.stdout.strip(), "ok")
 
 
 class ExternalAgentSessionTests(unittest.TestCase):
