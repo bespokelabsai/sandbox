@@ -176,6 +176,72 @@ sb.upload_file("./local_data.csv", "/home/user/data.csv")
 sb.download_file("/home/user/results.json", "./results.json")
 ```
 
+### Agent-ready sandboxes
+
+Sandboxes can also be bound to agents without replacing the low-level sandbox
+API. Agent placement is explicit:
+
+- `inside`: the agent process runs inside the sandbox, useful for CLI agents
+  such as Codex CLI, Claude Code, or a custom inference runner.
+- `external`: the agent process runs outside the sandbox and drives it through
+  capability-checked sandbox tools.
+
+Inside-sandbox agent:
+
+```python
+from bespokelabs.sandbox import AgentSpec, Sandbox
+
+with Sandbox(
+    "docker",
+    preset="codex",
+    git_repo="https://github.com/acme/project",
+) as sb:
+    agent = sb.agent(AgentSpec.inside(
+        name="codex",
+        command=["codex", "exec"],
+        cwd="/project",
+    ))
+
+    result = agent.run("Run the eval suite and summarize failures")
+    print(result.stdout)
+```
+
+External-driver agent:
+
+```python
+from bespokelabs.sandbox import AgentSpec, Sandbox
+
+def run_eval(ctx, prompt: str) -> str:
+    ctx.write_file("/workspace/task.txt", prompt)
+    result = ctx.shell("python3", ["/workspace/eval.py"])
+    return result.stdout
+
+with Sandbox(
+    "docker",
+    files={"/workspace/eval.py": "print('ok')"},
+) as sb:
+    agent = sb.agent(AgentSpec.external(
+        name="eval-runner",
+        capabilities=["shell", "files"],
+        runner=run_eval,
+    ))
+
+    print(agent.run("Evaluate this input"))
+```
+
+For external agent frameworks, use `agent_tools(...)` directly:
+
+```python
+with Sandbox("docker") as sb:
+    tools = sb.agent_tools(capabilities=["shell", "files", "patch"])
+    tools.write_file("/workspace/input.txt", "hello")
+    print(tools.shell("cat", ["/workspace/input.txt"]).stdout)
+```
+
+The generic context currently exposes `shell`, `files`, and `patch` operations.
+This keeps basic evaluation and inference usage stable while making the agent
+runtime boundary visible.
+
 ### Presets
 
 Presets are predefined sandbox configurations with setup commands that run after creation.

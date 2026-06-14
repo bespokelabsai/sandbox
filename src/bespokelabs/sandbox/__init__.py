@@ -12,6 +12,14 @@ Usage:
         print(result.stdout)
 """
 
+from bespokelabs.sandbox.agents import (
+    AgentCapability,
+    AgentContext,
+    AgentInputMode,
+    AgentPlacement,
+    AgentSession,
+    AgentSpec,
+)
 from bespokelabs.sandbox.aio import AsyncSandbox, AsyncSandboxClient
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
@@ -35,6 +43,12 @@ __all__ = [
     "SandboxClient",
     "AsyncSandbox",
     "AsyncSandboxClient",
+    "AgentSpec",
+    "AgentSession",
+    "AgentContext",
+    "AgentPlacement",
+    "AgentCapability",
+    "AgentInputMode",
     "SandboxPreset",
     "SandboxConfig",
     "SandboxResult",
