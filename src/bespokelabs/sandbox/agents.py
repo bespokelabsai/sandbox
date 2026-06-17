@@ -16,7 +16,7 @@ from bespokelabs.sandbox.types import FileInfo, SandboxResult
 if TYPE_CHECKING:
     from bespokelabs.sandbox.sandbox import Sandbox
 
-AgentPlacement = Literal["inside", "external"]
+AgentPlacement = Literal["inside", "outside"]
 AgentCapability = Literal["shell", "files", "patch", "ports", "artifacts"]
 AgentInputMode = Literal["stdin", "argv", "file", "none"]
 AgentRunner = Callable[["AgentContext", str], Any]
@@ -31,7 +31,7 @@ class AgentSpec:
     """Factory namespace for concrete agent specs.
 
     Use :meth:`inside` for an agent process that runs in the sandbox and
-    :meth:`external` for an outside runner that drives sandbox tools.
+    :meth:`outside` for a host-side runner that drives sandbox tools.
     """
 
     name: str
@@ -62,15 +62,15 @@ class AgentSpec:
         )
 
     @classmethod
-    def external(
+    def outside(
         cls,
         *,
         name: str,
         capabilities: list[AgentCapability],
         runner: AgentRunner | None = None,
-    ) -> ExternalAgentSpec:
+    ) -> OutsideAgentSpec:
         """Create a spec for an outside agent that drives sandbox tools."""
-        return ExternalAgentSpec(
+        return OutsideAgentSpec(
             name=name,
             capabilities=capabilities,
             runner=runner,
@@ -78,7 +78,7 @@ class AgentSpec:
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         del args, kwargs
-        raise TypeError("Use AgentSpec.inside(...) or AgentSpec.external(...)")
+        raise TypeError("Use AgentSpec.inside(...) or AgentSpec.outside(...)")
 
 
 @dataclass
@@ -109,13 +109,13 @@ class InsideAgentSpec(AgentSpec):
 
 
 @dataclass
-class ExternalAgentSpec(AgentSpec):
+class OutsideAgentSpec(AgentSpec):
     """Agent spec for an outside runner that drives sandbox tools."""
 
     name: str
     capabilities: list[AgentCapability]
     runner: AgentRunner | None = None
-    placement: Literal["external"] = field(default="external", init=False)
+    placement: Literal["outside"] = field(default="outside", init=False)
 
     def __post_init__(self) -> None:
         _validate_name(self.name)
@@ -136,7 +136,7 @@ def _normalize_capabilities(capabilities: list[AgentCapability]) -> list[AgentCa
 
 
 class AgentContext:
-    """Capability-checked sandbox facade for external agents."""
+    """Capability-checked sandbox facade for outside agents."""
 
     def __init__(self, sandbox: Sandbox, capabilities: list[AgentCapability] | None = None) -> None:
         self._sandbox = sandbox
@@ -198,9 +198,9 @@ class AgentSession:
         return self._context
 
     def run(self, prompt: str) -> Any:
-        if isinstance(self._spec, ExternalAgentSpec):
+        if isinstance(self._spec, OutsideAgentSpec):
             if self._spec.runner is None:
-                raise SandboxError("External agent spec requires a runner to call run()")
+                raise SandboxError("Outside agent spec requires a runner to call run()")
             return self._spec.runner(self._context, prompt)
         if isinstance(self._spec, InsideAgentSpec):
             return self._run_inside(prompt, self._spec)

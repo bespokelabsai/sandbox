@@ -193,7 +193,7 @@ API. Agent placement is explicit:
 
 - `inside`: the agent process runs inside the sandbox, useful for CLI agents
   such as Codex CLI, Claude Code, or a custom inference runner.
-- `external`: the agent process runs outside the sandbox and drives it through
+- `outside`: the agent process runs outside the sandbox and drives it through
   capability-checked sandbox tools.
 
 Inside-sandbox agent:
@@ -216,7 +216,7 @@ with Sandbox(
     print(result.stdout)
 ```
 
-External-driver agent:
+Outside-driver agent:
 
 ```python
 from bespokelabs.sandbox import AgentSpec, Sandbox
@@ -230,7 +230,7 @@ with Sandbox(
     "docker",
     files={"/workspace/eval.py": "print('ok')"},
 ) as sb:
-    agent = sb.agent(AgentSpec.external(
+    agent = sb.agent(AgentSpec.outside(
         name="eval-runner",
         capabilities=["shell", "files"],
         runner=run_eval,
@@ -239,7 +239,14 @@ with Sandbox(
     print(agent.run("Evaluate this input"))
 ```
 
-For external agent frameworks, use `agent_tools(...)` directly:
+For a complete Claude Code outside-sandbox example, see
+[`examples/claude_code_outside.py`](examples/claude_code_outside.py). It starts
+Claude Code on the host, clones a repository into a sandbox with `git_repo=...`,
+and gives Claude a localhost bridge for running commands inside the sandbox. The
+example asks Claude to count regular files directly in the cloned repository
+root.
+
+For outside agent frameworks, use `agent_tools(...)` directly:
 
 ```python
 with Sandbox("docker") as sb:

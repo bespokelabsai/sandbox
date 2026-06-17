@@ -323,7 +323,7 @@ class Sandbox:
         return AgentSession(self, spec)
 
     def agent_tools(self, capabilities: list[AgentCapability] | None = None) -> AgentContext:
-        """Return a capability-checked context for an external agent."""
+        """Return a capability-checked context for an outside agent."""
         self._check_alive()
         return AgentContext(self, capabilities)
 
