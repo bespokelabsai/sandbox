@@ -21,6 +21,12 @@ class PresetTests(unittest.TestCase):
         self.assertEqual(preset.description, "Sandbox with Codex CLI installed")
         self.assertEqual(preset.image, "ghcr.io/bespokelabsai/sandbox/codex:v2")
         self.assertEqual(preset.setup_commands, ["npm install -g @openai/codex"])
+        self.assertEqual(
+            preset.backend_setup_commands["tensorlake"],
+            [
+                "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g @openai/codex",
+            ],
+        )
         self.assertEqual(preset.memory_mb, 2048)
         self.assertEqual(preset.timeout_secs, 1800)
         self.assertTrue(preset.allow_internet)
@@ -31,6 +37,12 @@ class PresetTests(unittest.TestCase):
         self.assertEqual(preset.description, "Sandbox with Claude Code (Anthropic CLI) installed")
         self.assertEqual(preset.image, "ghcr.io/bespokelabsai/sandbox/claude-code:v2")
         self.assertEqual(preset.setup_commands, ["npm install -g @anthropic-ai/claude-code"])
+        self.assertEqual(
+            preset.backend_setup_commands["tensorlake"],
+            [
+                "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g @anthropic-ai/claude-code",
+            ],
+        )
         self.assertEqual(preset.memory_mb, 2048)
         self.assertEqual(preset.timeout_secs, 1800)
         self.assertTrue(preset.allow_internet)
@@ -48,6 +60,7 @@ class PresetImageResolutionTests(unittest.TestCase):
     targets tensorlake."""
 
     PRESET_NAME = "_test_dual_image"
+    BACKEND_ONLY_PRESET_NAME = "_test_backend_only_setup"
 
     def setUp(self) -> None:
         register_preset(SandboxPreset(
@@ -56,6 +69,13 @@ class PresetImageResolutionTests(unittest.TestCase):
             image="ghcr.io/test/img:latest",
             tensorlake_image="tl-name",
             setup_commands=["echo hi"],
+        ))
+        register_preset(SandboxPreset(
+            name=self.BACKEND_ONLY_PRESET_NAME,
+            description="backend-only setup preset for testing",
+            backend_setup_commands={
+                "tensorlake": ["echo tensorlake"],
+            },
         ))
 
         def _make_backend_client() -> mock.MagicMock:
@@ -80,6 +100,7 @@ class PresetImageResolutionTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._backends_patch.stop()
         PRESETS.pop(self.PRESET_NAME, None)
+        PRESETS.pop(self.BACKEND_ONLY_PRESET_NAME, None)
 
     def test_docker_inherits_oci_image_and_skips_setup(self) -> None:
         sb = Sandbox(backend="docker", preset=self.PRESET_NAME)
@@ -95,11 +116,18 @@ class PresetImageResolutionTests(unittest.TestCase):
 
     def test_tensorlake_without_tensorlake_image_runs_setup(self) -> None:
         # Built-in `claude-code` preset has image= set but no tensorlake_image,
-        # so Tensorlake falls back to running setup_commands.
+        # so Tensorlake falls back to its backend-specific setup commands.
         sb = Sandbox(backend="tensorlake", preset="claude-code")
 
         self.assertIsNone(sb._config.image)
-        sb._session.execute_command.assert_called()
+        sb._session.execute_command.assert_called_once_with(
+            "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g @anthropic-ai/claude-code"
+        )
+
+    def test_backend_only_setup_commands_run(self) -> None:
+        sb = Sandbox(backend="tensorlake", preset=self.BACKEND_ONLY_PRESET_NAME)
+
+        sb._session.execute_command.assert_called_once_with("echo tensorlake")
 
     def test_explicit_image_override_on_tensorlake_runs_setup(self) -> None:
         # Explicit override doesn't match preset.tensorlake_image, so we
@@ -112,6 +140,14 @@ class PresetImageResolutionTests(unittest.TestCase):
 
         self.assertEqual(sb._config.image, "user-override")
         sb._session.execute_command.assert_called()
+
+    def test_tensorlake_git_repo_uses_relative_destination(self) -> None:
+        sb = Sandbox(backend="tensorlake", git_repo="https://github.com/acme/project.git")
+
+        sb._session.execute_command.assert_called_once_with(
+            "git clone --depth 1 https://github.com/acme/project.git project",
+            None,
+        )
 
 
 if __name__ == "__main__":

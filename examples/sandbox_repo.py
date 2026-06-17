@@ -1,5 +1,5 @@
 """
-Summarize a GitHub repository using an agent inside a Daytona sandbox.
+Summarize a GitHub repository using an agent inside a cloud sandbox.
 
 This example keeps the four agent placement patterns separate so each one is
 easy to read:
@@ -14,11 +14,14 @@ Usage:
     python examples/sandbox_repo.py --agent claude-code --mode web
     python examples/sandbox_repo.py --agent codex --mode git_repo
     python examples/sandbox_repo.py --agent codex --mode web
+    python examples/sandbox_repo.py --backend tensorlake --agent codex --mode git_repo
     python examples/sandbox_repo.py --repo https://github.com/bespokelabsai/sandbox
 
 Prerequisites:
     pip install 'bespokelabs-sandbox[daytona]'
+    pip install 'bespokelabs-sandbox[tensorlake]'
     DAYTONA_API_KEY must be set
+    TENSORLAKE_API_KEY must be set or `tl login` must be configured
     ANTHROPIC_API_KEY must be set for --agent claude-code
     CODEX_API_KEY or OPENAI_API_KEY must be set for --agent codex
 """
@@ -27,13 +30,15 @@ import argparse
 import os
 import sys
 
-from bespokelabs.sandbox import AgentSpec, Sandbox
+from bespokelabs.sandbox import AgentSpec, Sandbox, SandboxPreset
 from bespokelabs.sandbox.types import SandboxResult
 
+BACKENDS = ("daytona", "tensorlake")
 DEFAULT_REPO = "https://github.com/bespokelabsai/curator"
 
 _CODEX_FINAL_OUTPUT_SCRIPT = r"""
 set -e
+export PATH="$HOME/.npm-global/bin:$PATH"
 
 if [ "$#" -lt 2 ]; then
     echo "Usage: codex wrapper requires a command and prompt" >&2
@@ -63,79 +68,102 @@ fi
 """.strip()
 
 
-def claude_code_with_git_repo(repo: str) -> SandboxResult:
+def claude_code_with_git_repo(
+    backend: str,
+    repo: str,
+    *,
+    tensorlake_image: str | None = None,
+) -> SandboxResult:
     """Clone the repo with Sandbox(git_repo=...) and run Claude Code inside it."""
     env_vars = _require_env("ANTHROPIC_API_KEY")
     repo_name = _repo_name(repo)
+    backend_name = _backend_label(backend)
 
     print(
-        f"Creating Daytona sandbox with Claude Code and cloning {repo}...", flush=True)
+        f"Creating {backend_name} sandbox with Claude Code and cloning {repo}...",
+        flush=True,
+    )
     with Sandbox(
-        "daytona",
-        preset="claude-code",
+        backend,
+        preset=_preset_for_backend(
+            backend,
+            "claude-code",
+            tensorlake_image=tensorlake_image,
+        ),
         git_repo=repo,
         env_vars=env_vars,
     ) as sb:
         agent = sb.agent(AgentSpec.inside(
             name="claude",
-            command=[
-                "claude",
-                "-p",
-                "--permission-mode",
-                "dontAsk",
-                "--",
-            ],
+            command=_claude_command(web=False),
             cwd=repo_name,
             env=env_vars,
             input_mode="argv",
         ))
 
         print(
-            f"Running Claude Code inside Daytona on cloned {repo_name} repo...", flush=True)
+            f"Running Claude Code inside {backend_name} on cloned {repo_name} repo...",
+            flush=True,
+        )
         return agent.run(_repo_prompt())
 
 
-def claude_code_without_git_repo(repo: str) -> SandboxResult:
+def claude_code_without_git_repo(
+    backend: str,
+    repo: str,
+    *,
+    tensorlake_image: str | None = None,
+) -> SandboxResult:
     """Ask Claude Code to summarize a GitHub URL with web tools."""
     env_vars = _require_env("ANTHROPIC_API_KEY")
+    backend_name = _backend_label(backend)
 
-    print("Creating Daytona sandbox with Claude Code...", flush=True)
+    print(f"Creating {backend_name} sandbox with Claude Code...", flush=True)
     with Sandbox(
-        "daytona",
-        preset="claude-code",
+        backend,
+        preset=_preset_for_backend(
+            backend,
+            "claude-code",
+            tensorlake_image=tensorlake_image,
+        ),
         env_vars=env_vars,
     ) as sb:
         agent = sb.agent(AgentSpec.inside(
             name="claude",
-            command=[
-                "claude",
-                "-p",
-                "--permission-mode",
-                "dontAsk",
-                "--allowedTools",
-                "WebFetch(domain:github.com)",
-                "WebSearch",
-                "--",
-            ],
+            command=_claude_command(web=True),
             env=env_vars,
             input_mode="argv",
         ))
 
         print(
-            f"Running Claude Code inside Daytona to summarize {repo}...", flush=True)
+            f"Running Claude Code inside {backend_name} to summarize {repo}...",
+            flush=True,
+        )
         return agent.run(_web_prompt(repo))
 
 
-def codex_with_git_repo(repo: str) -> SandboxResult:
+def codex_with_git_repo(
+    backend: str,
+    repo: str,
+    *,
+    tensorlake_image: str | None = None,
+) -> SandboxResult:
     """Clone the repo with Sandbox(git_repo=...) and run Codex inside it."""
     env_vars = {"CODEX_API_KEY": _codex_api_key()}
     repo_name = _repo_name(repo)
+    backend_name = _backend_label(backend)
 
     print(
-        f"Creating Daytona sandbox with Codex and cloning {repo}...", flush=True)
+        f"Creating {backend_name} sandbox with Codex and cloning {repo}...",
+        flush=True,
+    )
     with Sandbox(
-        "daytona",
-        preset="codex",
+        backend,
+        preset=_preset_for_backend(
+            backend,
+            "codex",
+            tensorlake_image=tensorlake_image,
+        ),
         git_repo=repo,
         env_vars=env_vars,
     ) as sb:
@@ -148,18 +176,30 @@ def codex_with_git_repo(repo: str) -> SandboxResult:
         ))
 
         print(
-            f"Running Codex inside Daytona on cloned {repo_name} repo...", flush=True)
+            f"Running Codex inside {backend_name} on cloned {repo_name} repo...",
+            flush=True,
+        )
         return agent.run(_repo_prompt())
 
 
-def codex_without_git_repo(repo: str) -> SandboxResult:
+def codex_without_git_repo(
+    backend: str,
+    repo: str,
+    *,
+    tensorlake_image: str | None = None,
+) -> SandboxResult:
     """Ask Codex to summarize a GitHub URL with live search enabled."""
     env_vars = {"CODEX_API_KEY": _codex_api_key()}
+    backend_name = _backend_label(backend)
 
-    print("Creating Daytona sandbox with Codex...", flush=True)
+    print(f"Creating {backend_name} sandbox with Codex...", flush=True)
     with Sandbox(
-        "daytona",
-        preset="codex",
+        backend,
+        preset=_preset_for_backend(
+            backend,
+            "codex",
+            tensorlake_image=tensorlake_image,
+        ),
         env_vars=env_vars,
     ) as sb:
         agent = sb.agent(AgentSpec.inside(
@@ -170,7 +210,9 @@ def codex_without_git_repo(repo: str) -> SandboxResult:
         ))
 
         print(
-            f"Running Codex inside Daytona to summarize {repo}...", flush=True)
+            f"Running Codex inside {backend_name} to summarize {repo}...",
+            flush=True,
+        )
         return agent.run(_web_prompt(repo))
 
 
@@ -190,6 +232,18 @@ def _web_prompt(repo: str) -> str:
     )
 
 
+def _claude_command(*, web: bool) -> list[str]:
+    command = ["claude", "-p", "--permission-mode", "dontAsk"]
+    if web:
+        command.extend([
+            "--allowedTools",
+            "WebFetch(domain:github.com)",
+            "WebSearch",
+        ])
+    command.append("--")
+    return command
+
+
 def _codex_command(*, search: bool) -> list[str]:
     command = ["codex"]
     if search:
@@ -202,7 +256,41 @@ def _codex_command(*, search: bool) -> list[str]:
         "--ignore-user-config",
         "--ignore-rules",
     ])
-    return ["bash", "-lc", _CODEX_FINAL_OUTPUT_SCRIPT, "codex-final-output", *command]
+    return ["bash", "-c", _CODEX_FINAL_OUTPUT_SCRIPT, "codex-final-output", *command]
+
+
+def _preset_for_backend(
+    backend: str,
+    preset_name: str,
+    *,
+    tensorlake_image: str | None,
+) -> str | SandboxPreset:
+    if backend != "tensorlake":
+        return preset_name
+
+    base = Sandbox.list_presets()[preset_name]
+    if tensorlake_image:
+        return SandboxPreset(
+            name=f"{preset_name}-tensorlake-example",
+            description=f"{base.description} for Tensorlake",
+            tensorlake_image=tensorlake_image,
+            setup_commands=list(base.setup_commands),
+            backend_setup_commands={
+                backend_name: list(commands)
+                for backend_name, commands in base.backend_setup_commands.items()
+            },
+            cpu=base.cpu,
+            memory_mb=base.memory_mb,
+            timeout_secs=base.timeout_secs,
+            env_vars=dict(base.env_vars),
+            allow_internet=base.allow_internet,
+        )
+
+    return preset_name
+
+
+def _backend_label(backend: str) -> str:
+    return "Tensorlake" if backend == "tensorlake" else "Daytona"
 
 
 def _repo_name(repo: str) -> str:
@@ -226,27 +314,54 @@ def _codex_api_key() -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Summarize a repository with an agent in Daytona")
+        description="Summarize a repository with an agent in a cloud sandbox")
+    parser.add_argument("--backend", choices=BACKENDS, default="daytona")
     parser.add_argument(
         "--agent", choices=["claude-code", "codex"], default="claude-code")
     parser.add_argument(
         "--mode", choices=["git_repo", "web"], default="git_repo")
     parser.add_argument("--repo", default=DEFAULT_REPO)
+    parser.add_argument(
+        "--tensorlake-image",
+        help=(
+            "Project-scoped Tensorlake image for the selected agent CLI. "
+            "When omitted, Tensorlake installs the CLI into a user npm prefix "
+            "during sandbox setup."
+        ),
+    )
     args = parser.parse_args()
 
-    if not os.environ.get("DAYTONA_API_KEY"):
+    if args.backend == "daytona" and not os.environ.get("DAYTONA_API_KEY"):
         sys.exit("Error: DAYTONA_API_KEY is not set.")
+    if args.backend != "tensorlake" and args.tensorlake_image:
+        sys.exit("Error: --tensorlake-image can only be used with --backend tensorlake.")
 
     agent = args.agent
 
     if agent == "claude-code" and args.mode == "git_repo":
-        result = claude_code_with_git_repo(args.repo)
+        result = claude_code_with_git_repo(
+            args.backend,
+            args.repo,
+            tensorlake_image=args.tensorlake_image,
+        )
     elif agent == "claude-code":
-        result = claude_code_without_git_repo(args.repo)
+        result = claude_code_without_git_repo(
+            args.backend,
+            args.repo,
+            tensorlake_image=args.tensorlake_image,
+        )
     elif args.mode == "git_repo":
-        result = codex_with_git_repo(args.repo)
+        result = codex_with_git_repo(
+            args.backend,
+            args.repo,
+            tensorlake_image=args.tensorlake_image,
+        )
     else:
-        result = codex_without_git_repo(args.repo)
+        result = codex_without_git_repo(
+            args.backend,
+            args.repo,
+            tensorlake_image=args.tensorlake_image,
+        )
 
     print(f"=== Summary of {args.repo} ===\n")
     print(result.stdout)

@@ -18,6 +18,8 @@ class SandboxPreset:
             Dockerfiles under images/ can be used as-is) and then set this.
             When set, setup_commands are skipped on the Tensorlake backend.
         setup_commands: Shell commands run after sandbox creation (in order).
+        backend_setup_commands: Backend-specific setup commands. When present
+            for a backend, these replace setup_commands on that backend.
         cpu: Minimum recommended vCPUs.
         memory_mb: Minimum recommended RAM in MB.
         timeout_secs: Recommended timeout.
@@ -30,6 +32,7 @@ class SandboxPreset:
     image: str | None = None
     tensorlake_image: str | None = None
     setup_commands: list[str] = field(default_factory=list)
+    backend_setup_commands: dict[str, list[str]] = field(default_factory=dict)
     cpu: float = 1.0
     memory_mb: int = 1024
     timeout_secs: int = 600
@@ -79,6 +82,11 @@ register_preset(SandboxPreset(
     setup_commands=[
         "npm install -g @anthropic-ai/claude-code",
     ],
+    backend_setup_commands={
+        "tensorlake": [
+            "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g @anthropic-ai/claude-code",
+        ],
+    },
     memory_mb=2048,
     timeout_secs=1800,
 ))
@@ -90,6 +98,11 @@ register_preset(SandboxPreset(
     setup_commands=[
         "npm install -g @openai/codex",
     ],
+    backend_setup_commands={
+        "tensorlake": [
+            "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g @openai/codex",
+        ],
+    },
     memory_mb=2048,
     timeout_secs=1800,
 ))

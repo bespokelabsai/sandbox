@@ -148,7 +148,7 @@ class Sandbox:
             if files:
                 for path, content in files.items():
                     self._session.write_file(path, content)
-            if resolved_preset and resolved_preset.setup_commands and not using_preset_image:
+            if resolved_preset and not using_preset_image:
                 self._run_preset_setup(resolved_preset)
         except Exception:
             self.destroy()
@@ -337,7 +337,11 @@ class Sandbox:
 
     def _run_preset_setup(self, preset: SandboxPreset) -> None:
         """Run preset setup commands after sandbox creation."""
-        for cmd in preset.setup_commands:
+        setup_commands = preset.backend_setup_commands.get(
+            self._config.backend,
+            preset.setup_commands,
+        )
+        for cmd in setup_commands:
             result = self._session.execute_command(cmd)
             if result.exit_code != 0:
                 raise SandboxCreationError(
