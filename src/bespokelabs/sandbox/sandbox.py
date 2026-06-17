@@ -5,8 +5,10 @@ import json
 import re
 import shlex
 import typing
+from pathlib import Path
 from typing import TypeVar, overload
 
+from bespokelabs.sandbox import _transfer
 from bespokelabs.sandbox.agents import AgentCapability, AgentContext, AgentSession, AgentSpec
 from bespokelabs.sandbox.backends import BACKENDS
 from bespokelabs.sandbox.exceptions import (
@@ -249,6 +251,41 @@ class Sandbox:
         """Download a file from the sandbox to a local path."""
         self._check_alive()
         self._session.download_file(remote_path, local_path)
+
+    def upload_dir(self, local_dir: str | Path, remote_dir: str, *, method: str = "auto") -> int:
+        """Upload a local directory tree into the sandbox; return the file count.
+
+        The single-file analogues are :meth:`upload_file` (one file) and
+        the ``files=`` constructor argument (seed a tree *at creation*).
+        This is the live-sandbox directory move: it walks *local_dir* and
+        recreates it under *remote_dir*.
+
+        By default (``method="auto"``) it packs the tree into one
+        ``.tar.gz``, uploads that single file, and extracts it inside the
+        sandbox — one round-trip, and tar restores both the directory
+        layout and the unix executable bits.  It falls back to a
+        file-by-file :meth:`upload_file` loop when ``tar`` is unavailable
+        in the sandbox.  Pass ``method="tar"`` or ``method="per_file"``
+        to force one strategy.
+
+        A relative *remote_dir* resolves under the working directory on
+        the local backend and under the home directory on cloud backends.
+        Empty source directories are a no-op (returns 0).
+        """
+        self._check_alive()
+        return _transfer.upload_dir(self, local_dir, remote_dir, method=method)
+
+    def download_dir(self, remote_dir: str, local_dir: str | Path, *, method: str = "auto") -> int:
+        """Download a directory tree from the sandbox to a local path; return the file count.
+
+        The directory counterpart of :meth:`download_file`.  Walks
+        *remote_dir* in the sandbox and recreates it under *local_dir*.
+        Like :meth:`upload_dir` it defaults to a single ``.tar.gz``
+        transfer (preserving layout and executable bits) and falls back
+        to a per-file loop when ``tar`` is unavailable.
+        """
+        self._check_alive()
+        return _transfer.download_dir(self, remote_dir, local_dir, method=method)
 
     # -- Lifecycle ---------------------------------------------------------
 

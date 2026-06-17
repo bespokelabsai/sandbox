@@ -23,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import TypeVar, overload
 
 from bespokelabs.sandbox.backends import BACKENDS
@@ -169,6 +170,18 @@ class AsyncSandbox:
     async def download_file(self, remote_path: str, local_path: str) -> None:
         """Async version of :meth:`Sandbox.download_file`."""
         await asyncio.to_thread(self._sandbox.download_file, remote_path, local_path)
+
+    async def upload_dir(self, local_dir: str | Path, remote_dir: str, *, method: str = "auto") -> int:
+        """Async version of :meth:`Sandbox.upload_dir`."""
+        return await asyncio.to_thread(
+            self._sandbox.upload_dir, local_dir, remote_dir, method=method
+        )
+
+    async def download_dir(self, remote_dir: str, local_dir: str | Path, *, method: str = "auto") -> int:
+        """Async version of :meth:`Sandbox.download_dir`."""
+        return await asyncio.to_thread(
+            self._sandbox.download_dir, remote_dir, local_dir, method=method
+        )
 
     # -- Lifecycle ---------------------------------------------------------
 
