@@ -1,3 +1,4 @@
+pydantic>=2.0
 
 [all]
 daytona>=0.1.0
