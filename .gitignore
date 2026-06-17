@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 *.pyo
 dist/
+build/
+*.egg-info/
 examples/.sandbox_workdir/
 examples/__pycache__/
 .claude/
