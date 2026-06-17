@@ -106,3 +106,20 @@ register_preset(SandboxPreset(
     memory_mb=2048,
     timeout_secs=1800,
 ))
+
+register_preset(SandboxPreset(
+    name="claude-code-codex",
+    description="Sandbox with Claude Code and Codex CLI installed",
+    image=f"{IMAGE_REGISTRY}/claude-code-codex:{PRESET_IMAGE_TAG}",
+    setup_commands=[
+        "npm install -g @anthropic-ai/claude-code @openai/codex",
+    ],
+    backend_setup_commands={
+        "tensorlake": [
+            "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && "
+            "npm install -g @anthropic-ai/claude-code @openai/codex",
+        ],
+    },
+    memory_mb=2048,
+    timeout_secs=1800,
+))

@@ -245,7 +245,7 @@ runtime boundary visible.
 ### Presets
 
 Presets are predefined sandbox configurations with setup commands that run after creation.
-The built-in presets are intentionally focused on agent CLIs: `codex` and `claude-code`.
+The built-in presets are intentionally focused on agent CLIs: `codex`, `claude-code`, and `claude-code-codex`.
 Both assume the sandbox image already includes Node.js and `npm` when setup commands are used as a fallback.
 
 #### Prebuilt Preset Images
@@ -288,6 +288,11 @@ with Sandbox("docker", preset="codex") as sb:
 # Sandbox with Claude Code installed
 with Sandbox("docker", preset="claude-code") as sb:
     sb.execute_command("claude --version")
+
+# Sandbox with both Claude Code and Codex CLI installed
+with Sandbox("docker", preset="claude-code-codex") as sb:
+    sb.execute_command("claude --version")
+    sb.execute_command("codex --version")
 ```
 
 Built-in presets:
@@ -295,6 +300,7 @@ Built-in presets:
 | Preset | What it installs | Defaults |
 |---|---|---|
 | `claude-code` | `@anthropic-ai/claude-code` via npm | 2GB RAM, 30min timeout |
+| `claude-code-codex` | `@anthropic-ai/claude-code` and `@openai/codex` via npm | 2GB RAM, 30min timeout |
 | `codex` | `@openai/codex` via npm | 2GB RAM, 30min timeout |
 
 #### Non-interactive web access

@@ -8,7 +8,7 @@ from bespokelabs.sandbox.presets import PRESETS, SandboxPreset, get_preset, regi
 from bespokelabs.sandbox.types import SandboxResult
 
 
-BUILT_IN_PRESETS = {"claude-code", "codex"}
+BUILT_IN_PRESETS = {"claude-code", "claude-code-codex", "codex"}
 
 
 class PresetTests(unittest.TestCase):
@@ -41,6 +41,23 @@ class PresetTests(unittest.TestCase):
             preset.backend_setup_commands["tensorlake"],
             [
                 "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g @anthropic-ai/claude-code",
+            ],
+        )
+        self.assertEqual(preset.memory_mb, 2048)
+        self.assertEqual(preset.timeout_secs, 1800)
+        self.assertTrue(preset.allow_internet)
+
+    def test_claude_code_codex_preset_is_registered_with_expected_defaults(self) -> None:
+        preset = get_preset("claude-code-codex")
+
+        self.assertEqual(preset.description, "Sandbox with Claude Code and Codex CLI installed")
+        self.assertEqual(preset.image, "ghcr.io/bespokelabsai/sandbox/claude-code-codex:v2")
+        self.assertEqual(preset.setup_commands, ["npm install -g @anthropic-ai/claude-code @openai/codex"])
+        self.assertEqual(
+            preset.backend_setup_commands["tensorlake"],
+            [
+                "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && "
+                "npm install -g @anthropic-ai/claude-code @openai/codex",
             ],
         )
         self.assertEqual(preset.memory_mb, 2048)
