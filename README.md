@@ -174,7 +174,17 @@ sb.upload_file("./local_data.csv", "/home/user/data.csv")
 
 # Download a file from the sandbox to local disk
 sb.download_file("/home/user/results.json", "./results.json")
+
+# Move a whole directory tree in or out (preserves structure + executable bits).
+# Defaults to a single tar.gz transfer, falling back to a per-file loop.
+sb.upload_dir("~/.claude/skills/my-skill", ".claude/skills/my-skill")
+sb.download_dir("/workspace/output", "./results")
 ```
+
+> Directory transfer is built on the single-file primitives above, so it works
+> on every backend. To seed a tree *before* the sandbox boots (e.g. so preset
+> setup sees it), use `build_files_map(local, remote)` with `Sandbox(files=...)`.
+> See [`examples/move_files_into_sandbox.py`](examples/move_files_into_sandbox.py).
 
 ### Agent-ready sandboxes
 

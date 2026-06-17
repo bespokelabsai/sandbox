@@ -12,6 +12,7 @@ Usage:
         print(result.stdout)
 """
 
+from bespokelabs.sandbox._transfer import build_files_map
 from bespokelabs.sandbox.agents import (
     AgentCapability,
     AgentContext,
@@ -59,6 +60,7 @@ __all__ = [
     "SandboxSessionState",
     "FileInfo",
     "SnapshotInfo",
+    "build_files_map",
     "SandboxError",
     "SandboxCreationError",
     "SandboxExecutionError",
