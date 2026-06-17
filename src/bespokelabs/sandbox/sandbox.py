@@ -13,6 +13,8 @@ from bespokelabs.sandbox.agents import AgentCapability, AgentContext, AgentSessi
 from bespokelabs.sandbox.backends import BACKENDS
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
+    CommandFailedError,
+    SandboxConfigurationError,
     SandboxCreationError,
     SandboxError,
     SandboxExecutionError,
@@ -26,6 +28,9 @@ from bespokelabs.sandbox.types import (
     SandboxSessionState,
     SnapshotInfo,
 )
+
+if typing.TYPE_CHECKING:
+    from bespokelabs.sandbox.workspace import Manifest
 
 T = TypeVar("T")
 
@@ -73,14 +78,16 @@ class Sandbox:
         files: dict[str, bytes | str] | None = None,
         git_repo: str | None = None,
         git_ref: str | None = None,
+        workspace: Manifest | None = None,
         _backend_client: SandboxBackendClient | None = None,
     ) -> None:
         # _backend_client is internal: SandboxClient.create() passes its
         # cached per-provider client here so connections are reused.
         backend = backend.lower().strip()
         if backend not in BACKENDS:
-            raise SandboxError(
-                f"Unknown backend '{backend}'. Choose from: {', '.join(BACKENDS)}"
+            raise SandboxConfigurationError(
+                f"Unknown backend '{backend}'. Choose from: {', '.join(BACKENDS)}",
+                context={"backend": backend},
             )
 
         # Resolve preset
@@ -129,7 +136,9 @@ class Sandbox:
             raise
         except Exception as exc:
             raise SandboxCreationError(
-                f"Failed to create sandbox on '{backend}': {exc}"
+                f"Failed to create sandbox on '{backend}': {exc}",
+                backend=backend,
+                op="create",
             ) from exc
 
         # Skip setup commands if the preset image was used (everything
@@ -150,6 +159,8 @@ class Sandbox:
             if files:
                 for path, content in files.items():
                     self._session.write_file(path, content)
+            if workspace is not None:
+                workspace.apply(self)
             if resolved_preset and not using_preset_image:
                 self._run_preset_setup(resolved_preset)
         except Exception:
@@ -385,7 +396,10 @@ class Sandbox:
             if result.exit_code != 0:
                 raise SandboxCreationError(
                     f"Preset '{preset.name}' setup failed on command: {cmd}\n"
-                    f"exit_code={result.exit_code}\nstderr={result.stderr}"
+                    f"exit_code={result.exit_code}\nstderr={result.stderr}",
+                    backend=self._config.backend,
+                    op="preset_setup",
+                    context={"preset": preset.name, "exit_code": result.exit_code},
                 )
 
     def _clone_repo(self, repo: str, ref: str | None) -> None:
@@ -402,7 +416,10 @@ class Sandbox:
         result = self._session.execute_command(cmd, None)
         if result.exit_code != 0:
             raise SandboxCreationError(
-                f"git clone of '{repo}' failed (exit {result.exit_code}):\n{result.stderr[:500]}"
+                f"git clone of '{repo}' failed (exit {result.exit_code}):\n{result.stderr[:500]}",
+                backend=self._config.backend,
+                op="git_clone",
+                context={"repo": repo, "exit_code": result.exit_code},
             )
 
     @classmethod
@@ -438,7 +455,9 @@ class Sandbox:
             raise
         except Exception as exc:
             raise SandboxCreationError(
-                f"Failed to resume sandbox on '{backend_name}': {exc}"
+                f"Failed to resume sandbox on '{backend_name}': {exc}",
+                backend=backend_name,
+                op="resume",
             ) from exc
         return cls._from_session(backend_name, session, SandboxConfig(backend=backend_name))
 
@@ -464,8 +483,9 @@ class SandboxClient:
     def __init__(self, backend: str) -> None:
         backend = backend.lower().strip()
         if backend not in BACKENDS:
-            raise SandboxError(
-                f"Unknown backend '{backend}'. Choose from: {', '.join(BACKENDS)}"
+            raise SandboxConfigurationError(
+                f"Unknown backend '{backend}'. Choose from: {', '.join(BACKENDS)}",
+                context={"backend": backend},
             )
         self._backend_name = backend
         self._backend_client: SandboxBackendClient = BACKENDS[backend]()
@@ -493,6 +513,7 @@ class SandboxClient:
         files: dict[str, bytes | str] | None = None,
         git_repo: str | None = None,
         git_ref: str | None = None,
+        workspace: Manifest | None = None,
     ) -> Sandbox:
         """Create a new sandbox session.
 
@@ -516,6 +537,7 @@ class SandboxClient:
             files=files,
             git_repo=git_repo,
             git_ref=git_ref,
+            workspace=workspace,
             _backend_client=self._backend_client,
         )
 
@@ -601,9 +623,13 @@ def _try_construct(data: dict, return_type: type[T]) -> T:
 def _parse_result(result: SandboxResult, return_type: type[T]) -> T:
     """Parse a SandboxResult's stdout into *return_type*."""
     if result.exit_code != 0:
-        raise SandboxExecutionError(
+        raise CommandFailedError(
             f"Command failed (exit {result.exit_code}) before parsing return_type.\n"
-            f"stderr: {result.stderr[:500]}"
+            f"stderr: {result.stderr[:500]}",
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            op="parse_result",
         )
 
     candidates = _extract_json_candidates(result.stdout)

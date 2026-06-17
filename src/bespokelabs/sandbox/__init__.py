@@ -26,10 +26,17 @@ from bespokelabs.sandbox.agents import (
 from bespokelabs.sandbox.aio import AsyncSandbox, AsyncSandboxClient
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
+    CommandFailedError,
+    ErrorCode,
     FeatureNotSupportedError,
+    SandboxConfigurationError,
+    SandboxConnectionError,
     SandboxCreationError,
     SandboxError,
     SandboxExecutionError,
+    SandboxNotFoundError,
+    SandboxTimeoutError,
+    WorkspaceError,
 )
 from bespokelabs.sandbox.presets import SandboxPreset
 from bespokelabs.sandbox.sandbox import Sandbox, SandboxClient, json_schema
@@ -39,6 +46,14 @@ from bespokelabs.sandbox.types import (
     SandboxResult,
     SandboxSessionState,
     SnapshotInfo,
+)
+from bespokelabs.sandbox.workspace import (
+    File,
+    GitRepo,
+    LocalDir,
+    LocalFile,
+    Manifest,
+    WorkspaceEntry,
 )
 
 __all__ = [
@@ -61,10 +76,23 @@ __all__ = [
     "FileInfo",
     "SnapshotInfo",
     "build_files_map",
+    "Manifest",
+    "WorkspaceEntry",
+    "File",
+    "LocalFile",
+    "LocalDir",
+    "GitRepo",
     "SandboxError",
+    "SandboxConfigurationError",
     "SandboxCreationError",
     "SandboxExecutionError",
+    "CommandFailedError",
+    "SandboxTimeoutError",
+    "SandboxConnectionError",
+    "SandboxNotFoundError",
     "BackendNotInstalledError",
     "FeatureNotSupportedError",
+    "WorkspaceError",
+    "ErrorCode",
     "json_schema",
 ]

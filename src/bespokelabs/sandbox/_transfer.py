@@ -31,6 +31,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Protocol
 
+from bespokelabs.sandbox.exceptions import WorkspaceError
 from bespokelabs.sandbox.types import SandboxResult
 
 _METHODS = ("auto", "tar", "per_file")
@@ -161,7 +162,12 @@ def _upload_tar(sb: _Transferable, base: str, files: list[tuple[Path, str]]) -> 
     script = f"mkdir -p {qd} && tar -xzf {qa} -C {qd}; rc=$?; rm -f {qa}; exit $rc"
     res = sb.execute_command("sh", ["-c", script])
     if res.exit_code != 0:
-        raise RuntimeError(f"tar extract failed (exit {res.exit_code}): {res.stderr.strip()}")
+        raise WorkspaceError(
+            f"tar extract failed (exit {res.exit_code}): {res.stderr.strip()}",
+            backend=getattr(sb, "backend_name", None),
+            op="upload_dir",
+            context={"dest": base, "exit_code": res.exit_code},
+        )
 
 
 def _download_tar(sb: _Transferable, base: str, dest: Path) -> int:
@@ -170,7 +176,12 @@ def _download_tar(sb: _Transferable, base: str, dest: Path) -> int:
     qd, qa = shlex.quote(base), shlex.quote(archive)
     res = sb.execute_command("sh", ["-c", f"tar -czf {qa} -C {qd} ."])
     if res.exit_code != 0:
-        raise RuntimeError(f"tar pack of '{base}' failed (exit {res.exit_code}): {res.stderr.strip()}")
+        raise WorkspaceError(
+            f"tar pack of '{base}' failed (exit {res.exit_code}): {res.stderr.strip()}",
+            backend=getattr(sb, "backend_name", None),
+            op="download_dir",
+            context={"source": base, "exit_code": res.exit_code},
+        )
 
     dest.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="sbx_dl_") as tmp:
@@ -187,7 +198,12 @@ def _download_per_file(sb: _Transferable, base: str, dest: Path) -> int:
     """Fallback: enumerate remote files with ``find`` and download each one."""
     res = sb.execute_command("sh", ["-c", f"find {shlex.quote(base)} -type f"])
     if res.exit_code != 0:
-        raise RuntimeError(f"listing '{base}' failed (exit {res.exit_code}): {res.stderr.strip()}")
+        raise WorkspaceError(
+            f"listing '{base}' failed (exit {res.exit_code}): {res.stderr.strip()}",
+            backend=getattr(sb, "backend_name", None),
+            op="download_dir",
+            context={"source": base, "exit_code": res.exit_code},
+        )
     count = 0
     for remote_path in res.stdout.splitlines():
         remote_path = remote_path.strip()
@@ -218,10 +234,16 @@ def _safe_extract(tar: tarfile.TarFile, dest: Path) -> None:
     dest = dest.resolve()
     for member in tar.getmembers():
         if member.issym() or member.islnk():
-            raise RuntimeError(f"refusing link member in archive: {member.name!r}")
+            raise WorkspaceError(
+                f"refusing link member in archive: {member.name!r}", op="extract"
+            )
         if member.isdev():
-            raise RuntimeError(f"refusing device/special member in archive: {member.name!r}")
+            raise WorkspaceError(
+                f"refusing device/special member in archive: {member.name!r}", op="extract"
+            )
         target = (dest / member.name).resolve()
         if target != dest and dest not in target.parents:
-            raise RuntimeError(f"refusing path-traversal in archive member: {member.name!r}")
+            raise WorkspaceError(
+                f"refusing path-traversal in archive member: {member.name!r}", op="extract"
+            )
     tar.extractall(dest)

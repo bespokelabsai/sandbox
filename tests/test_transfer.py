@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from bespokelabs.sandbox import AsyncSandbox, Sandbox, _transfer, build_files_map
+from bespokelabs.sandbox import AsyncSandbox, Sandbox, WorkspaceError, _transfer, build_files_map
 from bespokelabs.sandbox.exceptions import SandboxError
 
 
@@ -236,7 +236,7 @@ class SafeExtractTests(unittest.TestCase):
         target = self.root / "pwned.txt"  # outside dest
         archive = self._symlink_archive(str(target))
         with tarfile.open(archive, "r:gz") as tar:
-            with self.assertRaises((tarfile.TarError, RuntimeError)):
+            with self.assertRaises((tarfile.TarError, WorkspaceError)):
                 _transfer._safe_extract(tar, self.dest)
         self.assertFalse(target.exists())
 
@@ -248,7 +248,7 @@ class SafeExtractTests(unittest.TestCase):
             info.size = len(payload)
             tar.addfile(info, io.BytesIO(payload))
         with tarfile.open(archive, "r:gz") as tar:
-            with self.assertRaises((tarfile.TarError, RuntimeError)):
+            with self.assertRaises((tarfile.TarError, WorkspaceError)):
                 _transfer._safe_extract(tar, self.dest)
         self.assertFalse((self.root / "escape.txt").exists())
 
@@ -258,7 +258,7 @@ class SafeExtractTests(unittest.TestCase):
         archive = self._symlink_archive("anything")
         with mock.patch.object(_transfer, "_HAS_DATA_FILTER", False):
             with tarfile.open(archive, "r:gz") as tar:
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(WorkspaceError):
                     _transfer._safe_extract(tar, self.dest)
 
     def test_extracts_normal_members(self) -> None:
