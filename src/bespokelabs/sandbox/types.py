@@ -19,7 +19,8 @@ class SandboxConfig:
       - snapshot_id: Tensorlake, Modal
       - env_vars: all backends
       - timeout_secs: all backends (local and ray use subprocess timeout)
-      - workdir: Local, Safehouse (host directory used as the sandbox root)
+      - workdir: Local, Safehouse (host directory used as the sandbox root),
+                 Tensorlake (command working directory; defaults to /tmp)
       - backend_options: provider-specific escape hatch, merged last into the
         backend's underlying create call (Docker containers.run, Modal
         Sandbox.create, E2B Sandbox.create, Tensorlake create_and_connect,

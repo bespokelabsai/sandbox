@@ -337,7 +337,11 @@ class Sandbox:
 
     def _run_preset_setup(self, preset: SandboxPreset) -> None:
         """Run preset setup commands after sandbox creation."""
-        for cmd in preset.setup_commands:
+        setup_commands = preset.backend_setup_commands.get(
+            self._config.backend,
+            preset.setup_commands,
+        )
+        for cmd in setup_commands:
             result = self._session.execute_command(cmd)
             if result.exit_code != 0:
                 raise SandboxCreationError(

@@ -60,7 +60,11 @@ class TensorlakeClient:
         except Exception as exc:
             raise SandboxCreationError(f"Failed to create Tensorlake sandbox: {exc}") from exc
 
-        return TensorlakeSession(client=client, sandbox=sandbox)
+        return TensorlakeSession(
+            client=client,
+            sandbox=sandbox,
+            workdir=config.workdir or "/tmp",
+        )
 
     def resume(self, data: dict) -> TensorlakeSession:
         client = self._ensure_client()
@@ -75,15 +79,20 @@ class TensorlakeClient:
             raise SandboxCreationError(
                 f"Cannot resume Tensorlake sandbox '{data.get('sandbox_id')}': {exc}"
             ) from exc
-        return TensorlakeSession(client=client, sandbox=sandbox)
+        return TensorlakeSession(
+            client=client,
+            sandbox=sandbox,
+            workdir=data.get("workdir", "/tmp"),
+        )
 
 
 class TensorlakeSession:
     """One live Tensorlake sandbox."""
 
-    def __init__(self, *, client: object, sandbox: object) -> None:
+    def __init__(self, *, client: object, sandbox: object, workdir: str = "/tmp") -> None:
         self._client = client
         self._sandbox: object = sandbox
+        self._workdir = workdir
 
     def execute_code(self, code: str, language: str = "python") -> SandboxResult:
         try:
@@ -98,7 +107,14 @@ class TensorlakeSession:
 
     def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult:
         try:
-            cmd_args = ["-c", command] if not args else ["-c", f"{command} {' '.join(shlex.quote(a) for a in args)}"]
+            command_line = command if not args else f"{command} {' '.join(shlex.quote(a) for a in args)}"
+            script = (
+                'export PATH="$HOME/.npm-global/bin:$PATH"; '
+                f"mkdir -p {shlex.quote(self._workdir)} && "
+                f"cd {shlex.quote(self._workdir)} && "
+                f"{command_line}"
+            )
+            cmd_args = ["-c", script]
             result = self._sandbox.run("bash", cmd_args)
             return SandboxResult(
                 stdout=getattr(result, "stdout", "") or "",
@@ -178,7 +194,10 @@ class TensorlakeSession:
             raise SandboxExecutionError(f"Tensorlake snapshot failed: {exc}") from exc
 
     def session_state(self) -> dict:
-        return {"sandbox_id": str(self._sandbox.sandbox_id)}
+        return {
+            "sandbox_id": str(self._sandbox.sandbox_id),
+            "workdir": self._workdir,
+        }
 
     def destroy(self) -> None:
         try:
