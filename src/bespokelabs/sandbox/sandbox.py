@@ -148,7 +148,7 @@ class Sandbox:
             if files:
                 for path, content in files.items():
                     self._session.write_file(path, content)
-            if resolved_preset and resolved_preset.setup_commands and not using_preset_image:
+            if resolved_preset and not using_preset_image:
                 self._run_preset_setup(resolved_preset)
         except Exception:
             self.destroy()

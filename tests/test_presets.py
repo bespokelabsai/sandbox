@@ -60,6 +60,7 @@ class PresetImageResolutionTests(unittest.TestCase):
     targets tensorlake."""
 
     PRESET_NAME = "_test_dual_image"
+    BACKEND_ONLY_PRESET_NAME = "_test_backend_only_setup"
 
     def setUp(self) -> None:
         register_preset(SandboxPreset(
@@ -68,6 +69,13 @@ class PresetImageResolutionTests(unittest.TestCase):
             image="ghcr.io/test/img:latest",
             tensorlake_image="tl-name",
             setup_commands=["echo hi"],
+        ))
+        register_preset(SandboxPreset(
+            name=self.BACKEND_ONLY_PRESET_NAME,
+            description="backend-only setup preset for testing",
+            backend_setup_commands={
+                "tensorlake": ["echo tensorlake"],
+            },
         ))
 
         def _make_backend_client() -> mock.MagicMock:
@@ -92,6 +100,7 @@ class PresetImageResolutionTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._backends_patch.stop()
         PRESETS.pop(self.PRESET_NAME, None)
+        PRESETS.pop(self.BACKEND_ONLY_PRESET_NAME, None)
 
     def test_docker_inherits_oci_image_and_skips_setup(self) -> None:
         sb = Sandbox(backend="docker", preset=self.PRESET_NAME)
@@ -114,6 +123,11 @@ class PresetImageResolutionTests(unittest.TestCase):
         sb._session.execute_command.assert_called_once_with(
             "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g @anthropic-ai/claude-code"
         )
+
+    def test_backend_only_setup_commands_run(self) -> None:
+        sb = Sandbox(backend="tensorlake", preset=self.BACKEND_ONLY_PRESET_NAME)
+
+        sb._session.execute_command.assert_called_once_with("echo tensorlake")
 
     def test_explicit_image_override_on_tensorlake_runs_setup(self) -> None:
         # Explicit override doesn't match preset.tensorlake_image, so we
