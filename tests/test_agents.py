@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from bespokelabs.sandbox import AgentSpec, ExternalAgentSpec, InsideAgentSpec, Sandbox, SandboxError
+from bespokelabs.sandbox import AgentSpec, InsideAgentSpec, OutsideAgentSpec, Sandbox, SandboxError
 from bespokelabs.sandbox.types import SandboxResult
 
 
@@ -17,7 +17,7 @@ class AgentSpecTests(unittest.TestCase):
 
     def test_unknown_capability_raises(self) -> None:
         with self.assertRaises(ValueError):
-            ExternalAgentSpec(name="agent", capabilities=["database"])  # type: ignore[list-item]
+            OutsideAgentSpec(name="agent", capabilities=["database"])  # type: ignore[list-item]
 
     def test_inside_factory_returns_inside_spec(self) -> None:
         spec = AgentSpec.inside(name="python", command=["python3", "-c", "print('ok')"])
@@ -27,11 +27,11 @@ class AgentSpecTests(unittest.TestCase):
         self.assertFalse(hasattr(spec, "preset"))
         self.assertFalse(hasattr(spec, "runner"))
 
-    def test_external_factory_returns_external_spec(self) -> None:
-        spec = AgentSpec.external(name="external", capabilities=["files"])
+    def test_outside_factory_returns_outside_spec(self) -> None:
+        spec = AgentSpec.outside(name="outside", capabilities=["shell"])
 
-        self.assertIsInstance(spec, ExternalAgentSpec)
-        self.assertEqual(spec.placement, "external")
+        self.assertIsInstance(spec, OutsideAgentSpec)
+        self.assertEqual(spec.placement, "outside")
         self.assertFalse(hasattr(spec, "command"))
 
 
@@ -173,20 +173,20 @@ class InsideAgentSessionTests(unittest.TestCase):
             self.assertEqual(result.stdout.strip(), "sandbox")
 
 
-class ExternalAgentSessionTests(unittest.TestCase):
-    def test_external_agent_runner_receives_context(self) -> None:
+class OutsideAgentSessionTests(unittest.TestCase):
+    def test_outside_agent_runner_receives_context(self) -> None:
         def runner(ctx, prompt: str) -> str:
             ctx.write_file("/prompt.txt", prompt)
             return ctx.read_file("/prompt.txt").decode()
 
         with Sandbox("local") as sb:
-            agent = sb.agent(AgentSpec.external(
+            agent = sb.agent(AgentSpec.outside(
                 name="outside",
                 capabilities=["files"],
                 runner=runner,
             ))
 
-            self.assertEqual(agent.run("external prompt"), "external prompt")
+            self.assertEqual(agent.run("outside prompt"), "outside prompt")
 
     def test_agent_tools_enforce_capabilities(self) -> None:
         with Sandbox("local") as sb:
@@ -206,9 +206,9 @@ class ExternalAgentSessionTests(unittest.TestCase):
             with self.assertRaises(SandboxError):
                 tools.write_file("/blocked.txt", "no")
 
-    def test_external_agent_without_runner_cannot_run(self) -> None:
+    def test_outside_agent_without_runner_cannot_run(self) -> None:
         with Sandbox("local") as sb:
-            agent = sb.agent(AgentSpec.external(name="outside", capabilities=["shell"]))
+            agent = sb.agent(AgentSpec.outside(name="outside", capabilities=["shell"]))
 
             with self.assertRaises(SandboxError):
                 agent.run("prompt")

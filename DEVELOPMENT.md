@@ -47,7 +47,7 @@ There are two first-class modes:
 
 - `inside`: the agent process runs inside the sandbox. This fits CLI agents
   such as Codex CLI, Claude Code, Gemini CLI, or a custom inference runner.
-- `external`: the agent process runs outside the sandbox and drives it through
+- `outside`: the agent process runs outside the sandbox and drives it through
   sandbox-backed tools such as shell, files, patches, ports, and artifacts.
 
 Example shape:
@@ -64,7 +64,7 @@ with Sandbox("docker", git_repo="https://github.com/acme/project") as sb:
     result = agent.run("Run the eval and summarize failures")
 ```
 
-External-driver shape:
+Outside-driver shape:
 
 ```python
 with Sandbox("docker", image="python:3.12-slim") as sb:
@@ -89,7 +89,7 @@ The initial agent-facing API can be small:
 - `AgentSpec`: declares name, placement, command, environment, working
   directory, input mode, and capabilities.
 - `AgentSession`: wraps an inside-sandbox agent process and exposes `run(...)`.
-- `AgentContext`: wraps a sandbox for external agents and exposes capability
+- `AgentContext`: wraps a sandbox for outside agents and exposes capability
   methods such as `shell(...)`, `read_file(...)`, `write_file(...)`, and
   `apply_patch(...)`.
 - `agent_tools(...)`: returns framework-specific or generic tools backed by

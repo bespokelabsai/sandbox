@@ -19,8 +19,8 @@ from bespokelabs.sandbox.agents import (
     AgentPlacement,
     AgentSession,
     AgentSpec,
-    ExternalAgentSpec,
     InsideAgentSpec,
+    OutsideAgentSpec,
 )
 from bespokelabs.sandbox.aio import AsyncSandbox, AsyncSandboxClient
 from bespokelabs.sandbox.exceptions import (
@@ -49,7 +49,7 @@ __all__ = [
     "AgentSession",
     "AgentContext",
     "InsideAgentSpec",
-    "ExternalAgentSpec",
+    "OutsideAgentSpec",
     "AgentPlacement",
     "AgentCapability",
     "AgentInputMode",
