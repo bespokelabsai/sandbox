@@ -270,7 +270,9 @@ class Sandbox:
 
         A relative *remote_dir* resolves under the working directory on
         the local backend and under the home directory on cloud backends.
-        Empty source directories are a no-op (returns 0).
+        Symlinks in the source tree are skipped — links are never followed
+        off-tree, so a stray symlink cannot copy a host file into the
+        sandbox.  Empty source directories are a no-op (returns 0).
         """
         self._check_alive()
         return _transfer.upload_dir(self, local_dir, remote_dir, method=method)

@@ -5,12 +5,15 @@ All run against the local backend, which needs no external services.
 
 from __future__ import annotations
 
+import io
 import os
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from bespokelabs.sandbox import AsyncSandbox, Sandbox, build_files_map
+from bespokelabs.sandbox import AsyncSandbox, Sandbox, _transfer, build_files_map
 from bespokelabs.sandbox.exceptions import SandboxError
 
 
@@ -164,6 +167,110 @@ class AsyncTransferTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(n_up, 3)
             self.assertEqual(n_down, 3)
             self.assertTrue((out / "scripts" / "greet.sh").is_file())
+
+
+class SymlinkSourceTests(unittest.TestCase):
+    """A symlink in the source tree must never pull a host file into the sandbox."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        # A "secret" host file living OUTSIDE the directory being moved.
+        self.secret = self.root / "secret.txt"
+        self.secret.write_text("TOPSECRET")
+        self.src = self.root / "src"
+        self.src.mkdir()
+        (self.src / "real.txt").write_text("ok")
+
+    def test_iter_files_skips_symlinked_file(self) -> None:
+        (self.src / "link.txt").symlink_to(self.secret)
+        rels = [rel for _, rel in _transfer._iter_files(self.src)]
+        self.assertEqual(rels, ["real.txt"])
+
+    def test_iter_files_does_not_descend_symlinked_dir(self) -> None:
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "host.txt").write_text("host-only")
+        (self.src / "linkdir").symlink_to(outside, target_is_directory=True)
+        rels = [rel for _, rel in _transfer._iter_files(self.src)]
+        self.assertEqual(rels, ["real.txt"])
+
+    def test_build_files_map_skips_symlink(self) -> None:
+        (self.src / "link.txt").symlink_to(self.secret)
+        fm = build_files_map(self.src, "remote")
+        self.assertEqual(sorted(fm), ["remote/real.txt"])
+
+    def test_upload_dir_does_not_smuggle_symlinked_file(self) -> None:
+        (self.src / "link.txt").symlink_to(self.secret)
+        for method in ("tar", "per_file"):
+            with Sandbox("local") as sb:
+                n = sb.upload_dir(self.src, f"d/{method}", method=method)
+                listing = sb.execute_command("sh", ["-c", f"find d/{method} -type f | sort"]).stdout
+            self.assertEqual(n, 1, method)
+            self.assertIn(f"d/{method}/real.txt", listing)
+            self.assertNotIn("link.txt", listing)
+            self.assertNotIn("secret", listing)
+
+
+class SafeExtractTests(unittest.TestCase):
+    """download_dir's local extraction must reject members that escape the destination."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.dest = self.root / "out"
+        self.dest.mkdir()
+
+    def _symlink_archive(self, linkname: str) -> Path:
+        archive = self.root / "evil.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            info = tarfile.TarInfo("evil")
+            info.type = tarfile.SYMTYPE
+            info.linkname = linkname
+            tar.addfile(info)
+        return archive
+
+    def test_rejects_absolute_symlink_member(self) -> None:
+        target = self.root / "pwned.txt"  # outside dest
+        archive = self._symlink_archive(str(target))
+        with tarfile.open(archive, "r:gz") as tar:
+            with self.assertRaises((tarfile.TarError, RuntimeError)):
+                _transfer._safe_extract(tar, self.dest)
+        self.assertFalse(target.exists())
+
+    def test_rejects_parent_traversal_member(self) -> None:
+        archive = self.root / "evil2.tar.gz"
+        payload = b"x"
+        with tarfile.open(archive, "w:gz") as tar:
+            info = tarfile.TarInfo("../escape.txt")
+            info.size = len(payload)
+            tar.addfile(info, io.BytesIO(payload))
+        with tarfile.open(archive, "r:gz") as tar:
+            with self.assertRaises((tarfile.TarError, RuntimeError)):
+                _transfer._safe_extract(tar, self.dest)
+        self.assertFalse((self.root / "escape.txt").exists())
+
+    def test_manual_fallback_rejects_links_without_data_filter(self) -> None:
+        # Force the pre-PEP-706 path (interpreters lacking tarfile.data_filter):
+        # the manual policy must reject link members outright, even relative ones.
+        archive = self._symlink_archive("anything")
+        with mock.patch.object(_transfer, "_HAS_DATA_FILTER", False):
+            with tarfile.open(archive, "r:gz") as tar:
+                with self.assertRaises(RuntimeError):
+                    _transfer._safe_extract(tar, self.dest)
+
+    def test_extracts_normal_members(self) -> None:
+        archive = self.root / "good.tar.gz"
+        payload = b"hello"
+        with tarfile.open(archive, "w:gz") as tar:
+            info = tarfile.TarInfo("sub/file.txt")
+            info.size = len(payload)
+            tar.addfile(info, io.BytesIO(payload))
+        with tarfile.open(archive, "r:gz") as tar:
+            _transfer._safe_extract(tar, self.dest)
+        self.assertEqual((self.dest / "sub" / "file.txt").read_bytes(), payload)
 
 
 if __name__ == "__main__":

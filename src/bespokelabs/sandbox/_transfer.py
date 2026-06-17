@@ -24,7 +24,6 @@ from __future__ import annotations
 import io
 import os
 import shlex
-import sys
 import tarfile
 import tempfile
 import uuid
@@ -35,6 +34,12 @@ from typing import Protocol
 from bespokelabs.sandbox.types import SandboxResult
 
 _METHODS = ("auto", "tar", "per_file")
+
+# PEP 706 added the "data" extraction filter and exposed ``tarfile.data_filter``.
+# It ships on 3.12+ and was backported to 3.8.17+, 3.9.17+, 3.10.12+, 3.11.4+ —
+# so probe the attribute rather than the (major, minor) version, which would
+# miss the patched 3.10 / 3.11 interpreters that *do* have the filter.
+_HAS_DATA_FILTER = hasattr(tarfile, "data_filter")
 
 
 class _Transferable(Protocol):
@@ -47,14 +52,28 @@ class _Transferable(Protocol):
 
 
 def _iter_files(local_dir: Path) -> Iterator[tuple[Path, str]]:
-    """Yield ``(abs_local_path, relative_posix_path)`` for every file under *local_dir*.
+    """Yield ``(abs_local_path, relative_posix_path)`` for every regular file under *local_dir*.
 
-    Directories themselves are not yielded (empty dirs are skipped); the
-    relative path uses forward slashes so it is identical on every host.
+    Symlinks are skipped — both symlinked files and symlinked directories.
+    The walk therefore never follows a link out of *local_dir*, so a tree
+    that happens to contain a symlink to ``/etc/passwd`` (or any other host
+    path) cannot smuggle that file's contents into the sandbox.  Directories
+    themselves are not yielded (empty dirs are skipped); the relative path
+    uses forward slashes so it is identical on every host.
     """
-    for path in sorted(local_dir.rglob("*")):
-        if path.is_file():
-            yield path, path.relative_to(local_dir).as_posix()
+    matches: list[tuple[Path, str]] = []
+    # os.walk(followlinks=False) does not descend into symlinked directories;
+    # prune them from `dirs` as well so nothing *under* a link is considered,
+    # then drop any symlinked file entries before reading them.
+    for root, dirs, files in os.walk(local_dir, followlinks=False):
+        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]
+        for name in files:
+            abs_path = Path(root) / name
+            if abs_path.is_symlink():
+                continue
+            matches.append((abs_path, abs_path.relative_to(local_dir).as_posix()))
+    matches.sort(key=lambda pair: pair[1])
+    yield from matches
 
 
 def _check_method(method: str) -> None:
@@ -78,6 +97,7 @@ def build_files_map(local_dir: str | Path, remote_dir: str) -> dict[str, bytes]:
 
     Note: ``files=`` writes go through ``write_file`` and do **not**
     preserve the unix executable bit; use ``upload_dir`` if that matters.
+    Symlinks in the tree are skipped (links are never followed off-tree).
     """
     base = _normalize(local_dir, remote_dir)
     return {f"{base[1]}/{rel}": abs_path.read_bytes() for abs_path, rel in _iter_files(base[0])}
@@ -182,19 +202,26 @@ def _download_per_file(sb: _Transferable, base: str, dest: Path) -> int:
 
 
 def _safe_extract(tar: tarfile.TarFile, dest: Path) -> None:
-    """Extract *tar* into *dest*, refusing any member that escapes *dest*.
+    """Extract *tar* into *dest*, refusing any member that could escape *dest*.
 
-    A portable stand-in for ``extractall(filter="data")``, which only
-    exists on Python 3.12+ (the project supports 3.10+).
+    When the interpreter has the PEP 706 ``data`` filter, defer to it — it
+    blocks absolute paths, ``..`` traversal, and links/devices that point
+    outside the destination, which a name-only check cannot (it never sees
+    ``member.linkname``).  On the few older interpreters without the filter,
+    fall back to a conservative policy: reject links and device/special
+    members outright, and any member whose path resolves outside *dest*.
     """
+    if _HAS_DATA_FILTER:
+        tar.extractall(dest, filter="data")
+        return
+
     dest = dest.resolve()
     for member in tar.getmembers():
+        if member.issym() or member.islnk():
+            raise RuntimeError(f"refusing link member in archive: {member.name!r}")
+        if member.isdev():
+            raise RuntimeError(f"refusing device/special member in archive: {member.name!r}")
         target = (dest / member.name).resolve()
         if target != dest and dest not in target.parents:
             raise RuntimeError(f"refusing path-traversal in archive member: {member.name!r}")
-    if sys.version_info >= (3, 12):
-        # The stdlib "data" filter also strips unsafe members; pair it with the
-        # manual check above, which is our only guard on 3.10 / 3.11.
-        tar.extractall(dest, filter="data")
-    else:
-        tar.extractall(dest)
+    tar.extractall(dest)
