@@ -118,8 +118,7 @@ def upload_dir(sb: _Transferable, local_dir: str | Path, remote_dir: str, *, met
     if use_tar:
         _upload_tar(sb, base, files)
     else:
-        for abs_path, rel in files:
-            sb.upload_file(str(abs_path), f"{base}/{rel}")
+        _upload_per_file(sb, base, files)
     return len(files)
 
 
@@ -146,6 +145,33 @@ def _normalize(local_dir: str | Path, remote_dir: str) -> tuple[Path, str]:
     if not src.is_dir():
         raise NotADirectoryError(f"local_dir is not a directory: {src}")
     return src, remote_dir.rstrip("/")
+
+
+def _upload_per_file(sb: _Transferable, base: str, files: list[tuple[Path, str]]) -> None:
+    """Upload each file with upload_file, then restore the executable bit.
+
+    upload_file is bytes-only on several backends (it carries no mode), so any
+    source file that is executable would land non-executable. The tar path gets
+    this for free via tar; here we re-apply ``chmod +x`` in one command for the
+    executable files, keeping the per-file fallback consistent with the tar path
+    and the documented contract.
+    """
+    exec_paths: list[str] = []
+    for abs_path, rel in files:
+        remote = f"{base}/{rel}"
+        sb.upload_file(str(abs_path), remote)
+        if abs_path.stat().st_mode & 0o111:
+            exec_paths.append(remote)
+    if exec_paths:
+        quoted = " ".join(shlex.quote(p) for p in exec_paths)
+        res = sb.execute_command("sh", ["-c", f"chmod +x {quoted}"])
+        if res.exit_code != 0:
+            raise WorkspaceError(
+                f"failed to restore executable bits after per-file upload (exit {res.exit_code})",
+                backend=getattr(sb, "backend_name", None),
+                op="upload_dir",
+                context={"dest": base, "exit_code": res.exit_code},
+            )
 
 
 def _upload_tar(sb: _Transferable, base: str, files: list[tuple[Path, str]]) -> None:

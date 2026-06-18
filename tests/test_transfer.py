@@ -15,6 +15,7 @@ from unittest import mock
 
 from bespokelabs.sandbox import AsyncSandbox, Sandbox, WorkspaceError, _transfer, build_files_map
 from bespokelabs.sandbox.exceptions import SandboxError
+from bespokelabs.sandbox.types import SandboxResult
 
 
 def _make_tree(root: Path) -> Path:
@@ -271,6 +272,68 @@ class SafeExtractTests(unittest.TestCase):
         with tarfile.open(archive, "r:gz") as tar:
             _transfer._safe_extract(tar, self.dest)
         self.assertEqual((self.dest / "sub" / "file.txt").read_bytes(), payload)
+
+
+class _UploadOnlySandbox:
+    """A backend whose upload_file carries bytes only (no mode) — like several cloud
+    backends, and unlike the local backend's mode-preserving shutil.copy2."""
+
+    backend_name = "fake"
+
+    def __init__(self, exit_code: int = 0) -> None:
+        self.uploaded: list[tuple[str, str]] = []
+        self.commands: list[tuple[str, list | None]] = []
+        self._exit_code = exit_code
+
+    def upload_file(self, local: str, remote: str) -> None:
+        self.uploaded.append((local, remote))
+
+    def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult:
+        self.commands.append((command, args))
+        return SandboxResult(stdout="", stderr="boom" if self._exit_code else "", exit_code=self._exit_code)
+
+    def write_file(self, path: str, content) -> None:  # pragma: no cover - unused here
+        pass
+
+    def download_file(self, remote: str, local: str) -> None:  # pragma: no cover - unused here
+        pass
+
+
+class UploadDirExecBitTests(unittest.TestCase):
+    """The per-file fallback must restore executable bits on bytes-only backends."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.src = _make_tree(Path(self._tmp.name))  # scripts/greet.sh is 0o755
+
+    def _chmod_cmds(self, sb: _UploadOnlySandbox) -> list[str]:
+        return [args[1] for cmd, args in sb.commands if cmd == "sh" and args and "chmod +x" in args[1]]
+
+    def test_per_file_restores_exec_bit(self) -> None:
+        sb = _UploadOnlySandbox()
+        n = _transfer.upload_dir(sb, self.src, "dest", method="per_file")
+        self.assertEqual(n, 3)
+        self.assertEqual(len(sb.uploaded), 3)
+        chmods = self._chmod_cmds(sb)
+        self.assertEqual(len(chmods), 1, sb.commands)
+        self.assertIn("dest/scripts/greet.sh", chmods[0])
+        # Plain files are not made executable.
+        self.assertNotIn("SKILL.md", chmods[0])
+        self.assertNotIn("notes.md", chmods[0])
+
+    def test_per_file_no_chmod_without_executables(self) -> None:
+        plain = Path(self._tmp.name) / "plain"
+        plain.mkdir()
+        (plain / "a.txt").write_text("a")
+        sb = _UploadOnlySandbox()
+        _transfer.upload_dir(sb, plain, "dest", method="per_file")
+        self.assertEqual(self._chmod_cmds(sb), [])
+
+    def test_per_file_chmod_failure_raises_workspace_error(self) -> None:
+        sb = _UploadOnlySandbox(exit_code=1)
+        with self.assertRaises(WorkspaceError):
+            _transfer.upload_dir(sb, self.src, "dest", method="per_file")
 
 
 if __name__ == "__main__":

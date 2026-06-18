@@ -275,9 +275,9 @@ class Sandbox:
         ``.tar.gz``, uploads that single file, and extracts it inside the
         sandbox — one round-trip, and tar restores both the directory
         layout and the unix executable bits.  It falls back to a
-        file-by-file :meth:`upload_file` loop when ``tar`` is unavailable
-        in the sandbox.  Pass ``method="tar"`` or ``method="per_file"``
-        to force one strategy.
+        file-by-file :meth:`upload_file` loop (re-applying executable bits
+        afterward) when ``tar`` is unavailable in the sandbox.  Pass
+        ``method="tar"`` or ``method="per_file"`` to force one strategy.
 
         A relative *remote_dir* resolves under the working directory on
         the local backend and under the home directory on cloud backends.
