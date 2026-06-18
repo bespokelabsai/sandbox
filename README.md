@@ -128,6 +128,7 @@ sb = Sandbox(
     files=None,           # {path: bytes|str} written into the sandbox on create
     git_repo=None,        # repo URL cloned into the sandbox on create
     git_ref=None,         # branch/tag for git_repo
+    workspace=None,       # Manifest of files/dirs/repos to materialize on create
 )
 ```
 
@@ -185,6 +186,53 @@ sb.download_dir("/workspace/output", "./results")
 > on every backend. To seed a tree *before* the sandbox boots (e.g. so preset
 > setup sees it), use `build_files_map(local, remote)` with `Sandbox(files=...)`.
 > See [`examples/move_files_into_sandbox.py`](examples/move_files_into_sandbox.py).
+
+### Declarative workspaces
+
+`files=`, `git_repo=`, and `upload_dir()` cover the imperative cases. For
+anything richer, pass a `Manifest` — a typed, ordered map of *destination →
+source* materialized at creation (built on the primitives above, so it works on
+every backend):
+
+```python
+from bespokelabs.sandbox import Sandbox, Manifest, GitRepo, LocalDir, LocalFile, File
+
+with Sandbox("daytona", workspace=Manifest(entries={
+    "repo": GitRepo("https://github.com/org/proj", ref="main"),
+    ".claude/skills/pirate": LocalDir("~/.claude/skills/talk-like-a-pirate"),
+    "data/seed.csv": LocalFile("./seed.csv"),
+    "config.json": File('{"env": "prod"}'),
+})) as sb:
+    ...
+```
+
+Entries materialize in insertion order, so a later one overlays an earlier one.
+`GitRepo` clones, `LocalDir` / `LocalFile` upload (preserving the executable
+bit), and `File` writes in-memory content. Subclass `WorkspaceEntry` for custom
+sources, or call `manifest.apply(sb)` on a live sandbox.
+
+### Errors
+
+Every failure is a `SandboxError` subclass carrying a machine-readable `code`,
+the `backend` and `op` in flight, a `retryable` flag, and a `context` dict — so
+you can branch on it instead of parsing message strings:
+
+```python
+from bespokelabs.sandbox import Sandbox, SandboxError
+
+try:
+    with Sandbox("daytona") as sb:
+        sb.execute_command("…")
+except SandboxError as e:
+    if e.retryable:        # transient (timeout / connection) — back off and retry
+        ...
+    print(e.code, e.backend, e.op, e.context)
+```
+
+Subtypes include `SandboxConfigurationError`, `SandboxCreationError`,
+`CommandFailedError` (with `exit_code` / `stdout` / `stderr`),
+`SandboxTimeoutError` and `SandboxConnectionError` (both `retryable`),
+`WorkspaceError`, `BackendNotInstalledError`, and `FeatureNotSupportedError`.
 
 ### Agent-ready sandboxes
 

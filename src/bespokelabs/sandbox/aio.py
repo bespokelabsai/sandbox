@@ -24,10 +24,10 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TypeVar, overload
+from typing import TYPE_CHECKING, TypeVar, overload
 
 from bespokelabs.sandbox.backends import BACKENDS
-from bespokelabs.sandbox.exceptions import SandboxError
+from bespokelabs.sandbox.exceptions import SandboxConfigurationError
 from bespokelabs.sandbox.presets import SandboxPreset
 from bespokelabs.sandbox.protocols import SandboxBackendClient
 from bespokelabs.sandbox.sandbox import Sandbox
@@ -37,6 +37,9 @@ from bespokelabs.sandbox.types import (
     SandboxSessionState,
     SnapshotInfo,
 )
+
+if TYPE_CHECKING:
+    from bespokelabs.sandbox.workspace import Manifest
 
 T = TypeVar("T")
 
@@ -78,6 +81,7 @@ class AsyncSandbox:
         files: dict[str, bytes | str] | None = None,
         git_repo: str | None = None,
         git_ref: str | None = None,
+        workspace: Manifest | None = None,
     ) -> AsyncSandbox:
         """One-step async creation; mirrors ``Sandbox(backend, ...)``."""
         return await AsyncSandboxClient(backend).create(
@@ -97,6 +101,7 @@ class AsyncSandbox:
             files=files,
             git_repo=git_repo,
             git_ref=git_ref,
+            workspace=workspace,
         )
 
     @classmethod
@@ -238,8 +243,9 @@ class AsyncSandboxClient:
     def __init__(self, backend: str) -> None:
         backend = backend.lower().strip()
         if backend not in BACKENDS:
-            raise SandboxError(
-                f"Unknown backend '{backend}'. Choose from: {', '.join(BACKENDS)}"
+            raise SandboxConfigurationError(
+                f"Unknown backend '{backend}'. Choose from: {', '.join(BACKENDS)}",
+                context={"backend": backend},
             )
         self._backend_name = backend
         self._backend_client: SandboxBackendClient | None = None
@@ -268,6 +274,7 @@ class AsyncSandboxClient:
         files: dict[str, bytes | str] | None = None,
         git_repo: str | None = None,
         git_ref: str | None = None,
+        workspace: Manifest | None = None,
     ) -> AsyncSandbox:
         """Create a new sandbox session.
 
@@ -293,6 +300,7 @@ class AsyncSandboxClient:
             files=files,
             git_repo=git_repo,
             git_ref=git_ref,
+            workspace=workspace,
             _backend_client=backend_client,
         )
         return AsyncSandbox(sandbox)
