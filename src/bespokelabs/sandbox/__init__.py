@@ -41,11 +41,13 @@ from bespokelabs.sandbox.exceptions import (
 from bespokelabs.sandbox.presets import SandboxPreset
 from bespokelabs.sandbox.sandbox import Sandbox, SandboxClient, json_schema
 from bespokelabs.sandbox.types import (
+    AgentRunResult,
     FileInfo,
     SandboxConfig,
     SandboxResult,
     SandboxSessionState,
     SnapshotInfo,
+    Usage,
 )
 from bespokelabs.sandbox.workspace import (
     File,
@@ -75,6 +77,8 @@ __all__ = [
     "SandboxSessionState",
     "FileInfo",
     "SnapshotInfo",
+    "Usage",
+    "AgentRunResult",
     "build_files_map",
     "Manifest",
     "WorkspaceEntry",

@@ -4,11 +4,13 @@ import dataclasses
 import json
 import re
 import shlex
+import time
 import typing
 from pathlib import Path
 from typing import TypeVar, overload
 
-from bespokelabs.sandbox import _transfer
+from bespokelabs.sandbox import _transfer, pricing
+from bespokelabs.sandbox._usage import parse_claude_result, result_text, usage_from_result
 from bespokelabs.sandbox.agents import AgentCapability, AgentContext, AgentSession, AgentSpec
 from bespokelabs.sandbox.backends import BACKENDS
 from bespokelabs.sandbox.exceptions import (
@@ -22,11 +24,13 @@ from bespokelabs.sandbox.exceptions import (
 from bespokelabs.sandbox.presets import PRESETS, SandboxPreset, get_preset, register_preset
 from bespokelabs.sandbox.protocols import SandboxBackendClient, SandboxBackendSession
 from bespokelabs.sandbox.types import (
+    AgentRunResult,
     FileInfo,
     SandboxConfig,
     SandboxResult,
     SandboxSessionState,
     SnapshotInfo,
+    Usage,
 )
 
 if typing.TYPE_CHECKING:
@@ -129,6 +133,7 @@ class Sandbox:
         self._preset = resolved_preset
         backend_client = _backend_client if _backend_client is not None else BACKENDS[backend]()
         self._destroyed = False
+        self._usage = Usage()
 
         try:
             self._session: SandboxBackendSession = backend_client.create(self._config)
@@ -338,6 +343,69 @@ class Sandbox:
         self._check_alive()
         return AgentContext(self, capabilities)
 
+    def run_agent(
+        self,
+        prompt: str,
+        *,
+        command: str = "claude",
+        extra_args: list[str] | None = None,
+        output_format: str = "json",
+        resume: bool = False,
+    ) -> AgentRunResult:
+        """Run Claude Code on *prompt* and return its answer plus token/cost usage.
+
+        Unlike :meth:`execute_command`, this owns the agent's output format so
+        usage data is always available: it invokes ``claude -p <prompt>
+        --output-format json`` (override the binary with *command*), parses the
+        reported token counts and ``total_cost_usd``, and estimates the compute
+        cost of the call (elapsed wall-clock x the backend's per-second price
+        from :mod:`bespokelabs.sandbox.pricing`).
+
+        The per-call :class:`Usage` is returned on the result and also added to
+        the sandbox total exposed by :attr:`usage`.  Pass ``resume=True`` to
+        continue the most recent conversation (``-c``) and ``extra_args`` to
+        forward extra CLI flags.
+
+        Only Claude Code is supported today; ``llm_cost_usd`` and token counts
+        reflect exactly what its JSON output reports (and may be ``0`` under
+        subscription auth that omits ``total_cost_usd``).  On non-zero exit the
+        result still carries whatever usage was parsed; inspect ``exit_code``.
+        """
+        self._check_alive()
+        args = ["-p", prompt, "--output-format", output_format]
+        if resume:
+            args.append("-c")
+        if extra_args:
+            args.extend(extra_args)
+
+        start = time.monotonic()
+        result = self._session.execute_command(command, args)
+        elapsed = time.monotonic() - start
+
+        record = parse_claude_result(result.stdout)
+        usage = usage_from_result(record) or Usage()
+        usage.compute_cost_usd = self._compute_cost(elapsed)
+        self._usage = self._usage + usage
+
+        text = result_text(record)
+        return AgentRunResult(
+            text=text if text is not None else result.stdout,
+            usage=usage,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            exit_code=result.exit_code,
+            raw=record,
+        )
+
+    def _compute_cost(self, elapsed_secs: float) -> float:
+        """Estimate sandbox compute cost for an interval of *elapsed_secs*."""
+        cost_per_sec = pricing.cost_per_second(
+            self._config.backend,
+            vcpu=self._config.cpu,
+            ram_gib=self._config.memory_mb / 1024,
+        )
+        return cost_per_sec * elapsed_secs
+
     @classmethod
     def resume(cls, state: SandboxSessionState) -> Sandbox:
         """Reattach to a running sandbox from serialized session state."""
@@ -366,6 +434,16 @@ class Sandbox:
     @property
     def is_alive(self) -> bool:
         return not self._destroyed
+
+    @property
+    def usage(self) -> Usage:
+        """Cumulative token + cost usage across all :meth:`run_agent` calls.
+
+        The compute-cost component sums the durations of the tracked agent
+        calls, not the sandbox's full wall-clock lifetime (idle time between
+        calls is not billed here).
+        """
+        return self._usage
 
     # -- Presets -----------------------------------------------------------
 
@@ -435,6 +513,7 @@ class Sandbox:
         sb._preset = None
         sb._session = session
         sb._destroyed = False
+        sb._usage = Usage()
         return sb
 
     @classmethod
