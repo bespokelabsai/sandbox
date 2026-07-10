@@ -32,10 +32,12 @@ from bespokelabs.sandbox.presets import SandboxPreset
 from bespokelabs.sandbox.protocols import SandboxBackendClient
 from bespokelabs.sandbox.sandbox import Sandbox
 from bespokelabs.sandbox.types import (
+    AgentRunResult,
     FileInfo,
     SandboxResult,
     SandboxSessionState,
     SnapshotInfo,
+    Usage,
 )
 
 if TYPE_CHECKING:
@@ -154,6 +156,25 @@ class AsyncSandbox:
             inject_schema=inject_schema,
         )
 
+    async def run_agent(
+        self,
+        prompt: str,
+        *,
+        command: str = "claude",
+        extra_args: list[str] | None = None,
+        output_format: str = "json",
+        resume: bool = False,
+    ) -> AgentRunResult:
+        """Async version of :meth:`Sandbox.run_agent`."""
+        return await asyncio.to_thread(
+            self._sandbox.run_agent,
+            prompt,
+            command=command,
+            extra_args=extra_args,
+            output_format=output_format,
+            resume=resume,
+        )
+
     # -- File operations ---------------------------------------------------
 
     async def list_files(self, path: str = "/") -> list[FileInfo]:
@@ -223,6 +244,11 @@ class AsyncSandbox:
     @property
     def is_alive(self) -> bool:
         return self._sandbox.is_alive
+
+    @property
+    def usage(self) -> Usage:
+        """Cumulative token + cost usage across all :meth:`run_agent` calls."""
+        return self._sandbox.usage
 
 
 class AsyncSandboxClient:

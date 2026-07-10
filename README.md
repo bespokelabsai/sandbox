@@ -307,6 +307,40 @@ The generic context currently exposes `shell`, `files`, and `patch` operations.
 This keeps basic evaluation and inference usage stable while making the agent
 runtime boundary visible.
 
+### Token usage & cost
+
+`run_agent(...)` runs Claude Code on a prompt and reports what the run cost.
+It drives the CLI with JSON output under the hood, so it can return both the
+assistant's text answer and a `Usage` breakdown — LLM token counts and dollar
+cost (from Claude Code's own `total_cost_usd`), plus an estimate of the sandbox
+compute the call consumed (elapsed wall-clock × the backend's per-second price).
+
+```python
+with Sandbox("local", preset="claude-code") as sb:
+    result = sb.run_agent("Review /code.py and suggest fixes.")
+    print(result.text)                       # the assistant's answer
+
+    u = result.usage                         # usage for this call
+    print(u.input_tokens, u.output_tokens)   # token counts
+    print(u.llm_cost_usd)                    # tokens, in dollars
+    print(u.compute_cost_usd)                # sandbox compute, in dollars
+    print(u.total_cost_usd)                  # llm + compute
+
+    # Continue the conversation; usage accumulates on the sandbox.
+    sb.run_agent("Now apply those fixes.", resume=True)
+    print(sb.usage.total_cost_usd)           # running total across both calls
+    print(sb.usage.total_tokens)
+```
+
+`sb.usage` is the running total across every `run_agent` call in the sandbox's
+lifetime (its compute component sums the agent-call durations, not idle time
+between calls). Pass extra CLI flags with `extra_args=[...]`. Only Claude Code
+is supported today; token counts and `llm_cost_usd` reflect exactly what its
+JSON output reports, so `llm_cost_usd` can be `0` under subscription auth that
+omits `total_cost_usd` (the token counts are still captured). The async
+`AsyncSandbox` exposes the same `run_agent(...)` / `usage`. This is distinct
+from `bespokelabs.sandbox.pricing`, which prices sandbox compute on its own.
+
 ### Presets
 
 Presets are predefined sandbox configurations with setup commands that run after creation.
