@@ -85,22 +85,33 @@ def flatten(lst):
         if args.prompt:
             prompt = args.prompt
 
-        # -p  : non-interactive single-prompt mode
-        # --output-format text : plain-text output (no markdown)
-        # -c  : continue the most recent conversation (enables resume)
-        claude_args = ["-p", prompt, "--output-format", "text"]
-        if args.resume:
-            claude_args.append("-c")
-
-        result = sb.execute_command("claude", args=claude_args)
+        # run_agent drives Claude Code with JSON output under the hood, so it
+        # can report token usage and cost.  It returns the assistant's text
+        # answer plus a Usage breakdown; resume=True continues the most recent
+        # conversation (the CLI's -c flag).
+        result = sb.run_agent(prompt, resume=args.resume)
 
         print("--- Claude Code response ---")
-        print(result.stdout)
+        print(result.text)
         if result.stderr:
             print("--- stderr ---", file=sys.stderr)
             print(result.stderr, file=sys.stderr)
         if result.exit_code != 0:
             print(f"(exit code: {result.exit_code})")
+
+        # Per-call token usage and cost for this run.
+        u = result.usage
+        print("--- usage (this call) ---")
+        print(f"tokens: {u.input_tokens} in / {u.output_tokens} out "
+              f"(+{u.cache_read_tokens} cache read, {u.cache_creation_tokens} cache write)")
+        print(f"llm cost:     ${u.llm_cost_usd:.4f}")
+        print(f"compute cost: ${u.compute_cost_usd:.4f}")
+        print(f"total cost:   ${u.total_cost_usd:.4f}")
+
+        # sb.usage is the running total across every run_agent call in this
+        # sandbox's lifetime (here, just one).
+        print(f"--- sandbox total: ${sb.usage.total_cost_usd:.4f} "
+              f"over {sb.usage.total_tokens} tokens ---")
 
 
 if __name__ == "__main__":

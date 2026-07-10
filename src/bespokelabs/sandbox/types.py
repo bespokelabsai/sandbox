@@ -52,6 +52,74 @@ class SandboxResult:
 
 
 @dataclass
+class Usage:
+    """Token and cost usage for an agent run.
+
+    Token counts and ``llm_cost_usd`` come from the agent CLI's own report
+    (e.g. Claude Code's ``total_cost_usd`` and ``usage`` block).
+    ``compute_cost_usd`` is the SDK's estimate of the sandbox compute the run
+    consumed (elapsed wall-clock x the backend's per-second price).
+
+    Instances add together so per-call usages aggregate into a sandbox total
+    (see :attr:`bespokelabs.sandbox.Sandbox.usage`)::
+
+        total = run_a.usage + run_b.usage
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    llm_cost_usd: float = 0.0
+    compute_cost_usd: float = 0.0
+
+    @property
+    def total_tokens(self) -> int:
+        """All tokens billed for the run, including cache reads/writes."""
+        return (
+            self.input_tokens
+            + self.output_tokens
+            + self.cache_read_tokens
+            + self.cache_creation_tokens
+        )
+
+    @property
+    def total_cost_usd(self) -> float:
+        """LLM token cost plus estimated sandbox compute cost."""
+        return self.llm_cost_usd + self.compute_cost_usd
+
+    def __add__(self, other: object) -> Usage:
+        if not isinstance(other, Usage):
+            return NotImplemented
+        return Usage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
+            cache_creation_tokens=self.cache_creation_tokens + other.cache_creation_tokens,
+            llm_cost_usd=self.llm_cost_usd + other.llm_cost_usd,
+            compute_cost_usd=self.compute_cost_usd + other.compute_cost_usd,
+        )
+
+
+@dataclass
+class AgentRunResult:
+    """Result of :meth:`bespokelabs.sandbox.Sandbox.run_agent`.
+
+    Carries the agent's text answer (``text``) alongside the token/cost
+    :class:`Usage` for the call.  The raw ``stdout``/``stderr``/``exit_code``
+    of the underlying CLI invocation are preserved, and ``raw`` holds the
+    parsed JSON result record when one was found.
+    """
+
+    text: str = ""
+    usage: Usage = field(default_factory=Usage)
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int = 0
+    raw: dict | None = None
+
+
+@dataclass
 class FileInfo:
     """Metadata for a file or directory inside the sandbox."""
 
