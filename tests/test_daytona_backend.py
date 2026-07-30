@@ -19,7 +19,7 @@ except ImportError:  # pragma: no cover - exercised only without the extra
     _HAS_DAYTONA = False
 
 if _HAS_DAYTONA:
-    from bespokelabs.sandbox.backends.daytona import _CREATE_TOKEN_LABEL, DaytonaClient
+    from bespokelabs.sandbox.backends.daytona import _CREATE_TOKEN_LABEL, DaytonaClient, _build_params
 
 
 # The exact shape of the failure seen in production: the create succeeded
@@ -192,6 +192,71 @@ class DaytonaCreateTimeoutOptionTests(unittest.TestCase):
 
         self.assertIn("no timeout at all", str(ctx.exception))
         self.assertEqual(fake.created, [])
+
+
+@unittest.skipUnless(_HAS_DAYTONA, "Daytona SDK not installed")
+class DaytonaDroppedConfigTests(unittest.TestCase):
+    """timeout_secs and workdir must reach Daytona, not be silently discarded."""
+
+    def _params(self, **config_kwargs):
+        config = SandboxConfig(backend="daytona", snapshot_id="snap", **config_kwargs)
+        return _build_params(config, create_token="tok")
+
+    def test_timeout_secs_is_not_silently_dropped(self) -> None:
+        # The 24h lifetime a caller asks for has to arrive as a real bound.
+        self.assertEqual(self._params(timeout_secs=24 * 60 * 60).ttl_minutes, 1440)
+
+    def test_timeout_secs_rounds_up_and_never_floors_to_zero(self) -> None:
+        # ttl_minutes=0 means "no TTL" to Daytona, the opposite of a 30s bound.
+        self.assertEqual(self._params(timeout_secs=30).ttl_minutes, 1)
+        self.assertEqual(self._params(timeout_secs=90).ttl_minutes, 2)
+
+    def test_backend_options_can_still_override_the_derived_ttl(self) -> None:
+        params = self._params(timeout_secs=600, backend_options={"ttl_minutes": 5})
+        self.assertEqual(params.ttl_minutes, 5)
+
+    def test_workdir_is_not_silently_dropped(self) -> None:
+        fake = _FakeDaytona()
+        config = SandboxConfig(backend="daytona", snapshot_id="snap", workdir="/work/project")
+
+        session = _client(fake).create(config)
+        session.execute_command("pytest", ["-q"])
+
+        sandbox = fake.live[0]
+        self.assertEqual(
+            sandbox.process.calls,
+            [("mkdir -p /work/project", None), ("pytest -q", "/work/project")],
+        )
+
+    def test_workdir_survives_session_state_and_resume(self) -> None:
+        fake = _FakeDaytona()
+        config = SandboxConfig(backend="daytona", snapshot_id="snap", workdir="/work/project")
+        client = _client(fake)
+
+        state = client.create(config).session_state()
+
+        self.assertEqual(state, {"sandbox_id": "sbx-1", "workdir": "/work/project"})
+        fake.get = lambda sandbox_id: fake.live[0]  # noqa: E731 - stand in for Daytona.get
+        client.resume(state).execute_command("pwd")
+        self.assertEqual(fake.live[0].process.calls[-1], ("pwd", "/work/project"))
+
+    def test_session_state_omits_workdir_when_unset(self) -> None:
+        fake = _FakeDaytona()
+
+        state = _client(fake).create(SandboxConfig(backend="daytona", snapshot_id="snap")).session_state()
+
+        self.assertEqual(state, {"sandbox_id": "sbx-1"})
+
+    def test_backend_options_env_vars_do_not_clobber_the_env_dict(self) -> None:
+        params = self._params(
+            env_vars={"ANTHROPIC_API_KEY": "secret", "SHARED": "from-env-vars"},
+            backend_options={"env_vars": {"EXTRA": "1", "SHARED": "from-options"}},
+        )
+
+        self.assertEqual(
+            params.env_vars,
+            {"ANTHROPIC_API_KEY": "secret", "SHARED": "from-options", "EXTRA": "1"},
+        )
 
 
 if __name__ == "__main__":

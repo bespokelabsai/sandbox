@@ -78,7 +78,7 @@ class DaytonaClient:
             raise SandboxCreationError(
                 f"Cannot resume Daytona sandbox '{data.get('sandbox_id')}': {exc}"
             ) from exc
-        return DaytonaSession(client=client, sandbox=sandbox)
+        return DaytonaSession(client=client, sandbox=sandbox, workdir=data.get("workdir"))
 
     def create(self, config: SandboxConfig) -> DaytonaSession:
         self._ensure_client()
@@ -91,6 +91,10 @@ class DaytonaClient:
         try:
             params = _build_params(config, create_token=create_token)
             sandbox = self._client.create(params, **create_kwargs)
+            if config.workdir:
+                # process.exec(cwd=...) does not create the directory, so make
+                # it once here.  Inside the try, so a failure is still reaped.
+                sandbox.process.exec(f"mkdir -p {shlex.quote(config.workdir)}")
         except Exception as exc:
             self._reap_orphan(create_token)
             raise SandboxCreationError(f"Failed to create Daytona sandbox: {exc}") from exc
@@ -99,7 +103,7 @@ class DaytonaClient:
             self._reap_orphan(create_token)
             raise
 
-        return DaytonaSession(client=self._client, sandbox=sandbox)
+        return DaytonaSession(client=self._client, sandbox=sandbox, workdir=config.workdir)
 
     def _reap_orphan(self, create_token: str) -> None:
         """Delete the sandbox a failed create may have left running.
@@ -187,8 +191,22 @@ def _build_params(config: SandboxConfig, *, create_token: str) -> object:
     common: dict = {}
     if config.env_vars:
         common["env_vars"] = config.env_vars
+
+    # timeout_secs is documented as the sandbox's max lifetime, and ttl_minutes
+    # is the only absolute lifetime bound Daytona offers: auto_stop_interval,
+    # auto_archive_interval and auto_delete_interval are all *idle* timers, so
+    # they would never stop a busy sandbox and would stop an idle one early.
+    # Rounded up, and floored at Daytona's 1-minute granularity.
+    common["ttl_minutes"] = max(1, math.ceil(config.timeout_secs / 60))
+
     if options:
+        # backend_options wins, as the documented escape hatch -- except that
+        # env_vars is merged rather than replaced, so a caller adding one
+        # variable here cannot silently drop everything passed via env_vars=.
+        option_env = options.get("env_vars")
         common.update(options)
+        if option_env and config.env_vars:
+            common["env_vars"] = {**config.env_vars, **option_env}
 
     # Stamped after backend_options so a caller's labels can add to the reap
     # handle but never replace it.
@@ -216,11 +234,18 @@ def _build_params(config: SandboxConfig, *, create_token: str) -> object:
 
 
 class DaytonaSession:
-    """One live Daytona sandbox."""
+    """One live Daytona sandbox.
 
-    def __init__(self, *, client: object, sandbox: object) -> None:
+    ``workdir`` is the working directory for shell commands, matching the
+    Tensorlake backend's meaning of the field.  It does not apply to
+    ``execute_code``, whose Daytona endpoint takes no working directory, nor
+    to file paths, which Daytona resolves against the sandbox root.
+    """
+
+    def __init__(self, *, client: object, sandbox: object, workdir: str | None = None) -> None:
         self._client = client
         self._sandbox: object = sandbox
+        self._workdir = workdir
 
     def execute_code(self, code: str, language: str = "python") -> SandboxResult:
         try:
@@ -236,7 +261,7 @@ class DaytonaSession:
     def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult:
         try:
             full_cmd = command if not args else f"{command} {' '.join(shlex.quote(a) for a in args)}"
-            response = self._sandbox.process.exec(full_cmd)
+            response = self._sandbox.process.exec(full_cmd, cwd=self._workdir)
             return SandboxResult(
                 stdout=getattr(response, "result", "") or "",
                 stderr="",
@@ -297,7 +322,12 @@ class DaytonaSession:
         sandbox_id = getattr(self._sandbox, "id", None)
         if sandbox_id is None:
             raise FeatureNotSupportedError("Daytona sandbox object exposes no id; cannot serialize")
-        return {"sandbox_id": str(sandbox_id)}
+        state = {"sandbox_id": str(sandbox_id)}
+        if self._workdir:
+            # Carried across resume so the working directory isn't dropped there
+            # either.
+            state["workdir"] = self._workdir
+        return state
 
     def destroy(self) -> None:
         try:
