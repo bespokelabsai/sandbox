@@ -1,18 +1,32 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
 import pathlib
 import shlex
 import threading
+import uuid
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     FeatureNotSupportedError,
+    SandboxConfigurationError,
     SandboxCreationError,
     SandboxExecutionError,
 )
 from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
+
+logger = logging.getLogger(__name__)
+
+# Label stamped on every sandbox this backend creates, carrying a token unique
+# to the create call.  Daytona filters on labels server-side, so this token is
+# the only handle we have on a sandbox whose create call failed *after* the
+# server had already built it.
+_CREATE_TOKEN_LABEL = "bespokelabs.sandbox/create-token"
+
+# backend_options key that overrides the deadline passed to Daytona.create().
+_CREATE_TIMEOUT_OPTION = "create_timeout"
 
 
 class DaytonaClient:
@@ -69,28 +83,116 @@ class DaytonaClient:
     def create(self, config: SandboxConfig) -> DaytonaSession:
         self._ensure_client()
 
+        # Unique to this create call.  If the call fails after Daytona has
+        # already built the sandbox, this token is how we find the orphan.
+        create_token = uuid.uuid4().hex
+        create_kwargs = _create_kwargs(config)
+
         try:
-            params = _build_params(config)
-            if params is not None:
-                sandbox = self._client.create(params)
-            else:
-                sandbox = self._client.create()
+            params = _build_params(config, create_token=create_token)
+            sandbox = self._client.create(params, **create_kwargs)
         except Exception as exc:
+            self._reap_orphan(create_token)
             raise SandboxCreationError(f"Failed to create Daytona sandbox: {exc}") from exc
+        except BaseException:
+            # KeyboardInterrupt / SystemExit: still reap, then propagate as-is.
+            self._reap_orphan(create_token)
+            raise
 
         return DaytonaSession(client=self._client, sandbox=sandbox)
 
+    def _reap_orphan(self, create_token: str) -> None:
+        """Delete the sandbox a failed create may have left running.
 
-def _build_params(config: SandboxConfig) -> object | None:
-    """Build the appropriate Daytona params object for the config."""
+        When the create request's HTTP response times out, the sandbox exists
+        server-side -- started, and billing -- and only the reply was lost.  The
+        Daytona SDK's exception carries no sandbox id: not as an attribute, not
+        in the message, and not in ``__cause__`` (its ``intercept_errors``
+        decorator re-raises ``from None``).  No caller above this layer can
+        clean that up, so it has to happen here, using the create-token label
+        ``_build_params`` stamped on the sandbox as the only remaining handle.
+
+        Best effort by design: any failure here is logged and swallowed so it
+        can never mask the creation error the caller actually needs to see.
+        """
+        try:
+            from daytona import ListSandboxesQuery  # type: ignore[import-untyped]
+
+            query = ListSandboxesQuery(labels={_CREATE_TOKEN_LABEL: create_token})
+            # list() is a generator, so materialize it inside the guard.
+            orphans = list(self._client.list(query))
+        except Exception:
+            logger.warning(
+                "Could not search for a Daytona sandbox orphaned by a failed create "
+                "(label %s=%s); it may still be running and billing.",
+                _CREATE_TOKEN_LABEL,
+                create_token,
+                exc_info=True,
+            )
+            return
+
+        for orphan in orphans:
+            orphan_id = getattr(orphan, "id", "<unknown>")
+            try:
+                self._client.delete(orphan)
+            except Exception:
+                logger.warning(
+                    "Failed to delete Daytona sandbox %s orphaned by a failed create; delete it manually.",
+                    orphan_id,
+                    exc_info=True,
+                )
+            else:
+                logger.warning(
+                    "Deleted Daytona sandbox %s orphaned by a failed create.", orphan_id
+                )
+
+
+def _create_kwargs(config: SandboxConfig) -> dict:
+    """Keyword arguments for ``Daytona.create()`` itself (not the params object)."""
+    raw = config.backend_options.get(_CREATE_TIMEOUT_OPTION)
+    if raw is None:
+        return {}
+    try:
+        timeout = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise SandboxConfigurationError(
+            f"backend_options['{_CREATE_TIMEOUT_OPTION}'] must be a number of seconds, got {raw!r}",
+            backend="daytona",
+            op="create",
+        ) from exc
+    if timeout <= 0:
+        raise SandboxConfigurationError(
+            f"backend_options['{_CREATE_TIMEOUT_OPTION}'] must be positive; the Daytona SDK treats 0 as "
+            "'no timeout at all', so pass a large finite value instead.",
+            backend="daytona",
+            op="create",
+        )
+    return {"timeout": timeout}
+
+
+def _build_params(config: SandboxConfig, *, create_token: str) -> object:
+    """Build the appropriate Daytona params object for the config.
+
+    Always returns a params object -- never ``None`` -- so the create-token
+    label lands on every sandbox.  ``Daytona.create(params)`` with neither a
+    snapshot nor an image behaves exactly like ``Daytona.create()``.
+    """
     from daytona import CreateSandboxFromImageParams, CreateSandboxFromSnapshotParams  # type: ignore[import-untyped]
     from daytona.common.sandbox import Resources  # type: ignore[import-untyped]
+
+    # _CREATE_TIMEOUT_OPTION targets Daytona.create(), not the params object;
+    # leaving it in would be silently swallowed (params ignore extra fields).
+    options = {k: v for k, v in config.backend_options.items() if k != _CREATE_TIMEOUT_OPTION}
 
     common: dict = {}
     if config.env_vars:
         common["env_vars"] = config.env_vars
-    if config.backend_options:
-        common.update(config.backend_options)
+    if options:
+        common.update(options)
+
+    # Stamped after backend_options so a caller's labels can add to the reap
+    # handle but never replace it.
+    common["labels"] = {**(common.get("labels") or {}), _CREATE_TOKEN_LABEL: create_token}
 
     if config.image:
         # Build resources if non-default cpu or memory is specified
@@ -110,10 +212,7 @@ def _build_params(config: SandboxConfig) -> object | None:
     if config.snapshot_id:
         return CreateSandboxFromSnapshotParams(snapshot=config.snapshot_id, **common)
 
-    if common:
-        return CreateSandboxFromSnapshotParams(**common)
-
-    return None
+    return CreateSandboxFromSnapshotParams(**common)
 
 
 class DaytonaSession:
