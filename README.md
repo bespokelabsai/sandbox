@@ -134,6 +134,15 @@ sb = Sandbox(
 
 Not every backend uses every parameter. Unsupported params are silently ignored.
 
+`timeout_secs` is a subprocess timeout on Local and Ray, a sandbox timeout on
+E2B and Modal, and on Daytona a wall-clock `ttl_minutes` deadline. Daytona
+destroys the sandbox when that deadline elapses in whatever state it is in,
+running work included; no activity resets the clock, and the clock starts at
+creation, so image pull and boot count against it. The mapping happens only
+when you pass `timeout_secs` yourself. Omit it — including when a preset
+supplies its own recommended value — and the Daytona sandbox gets no TTL at
+all, leaving it bounded only by Daytona's default 15-minute idle auto-stop.
+
 Constructing a `Sandbox` creates the underlying sandbox immediately. To launch
 many sandboxes on one backend, or to use `async`/`await`, see
 [Reusing a client across many sandboxes](#reusing-a-client-across-many-sandboxes)

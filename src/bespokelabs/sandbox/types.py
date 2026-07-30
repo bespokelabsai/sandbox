@@ -18,8 +18,12 @@ class SandboxConfig:
       - allow_internet: Tensorlake, Daytona, Docker
       - snapshot_id: Tensorlake, Modal
       - env_vars: all backends
-      - timeout_secs: all backends (local and ray use subprocess timeout;
-                 Daytona maps it to ttl_minutes, rounded up)
+      - timeout_secs: all backends (local and ray use subprocess timeout)
+      - timeout_secs_explicit: whether ``timeout_secs`` was supplied by the
+        caller rather than inherited from a preset or from the default above.
+        Set by ``Sandbox(...)``; only Daytona reads it, because there
+        timeout_secs becomes ttl_minutes -- a hard wall-clock destroy -- and a
+        value nobody asked for must not silently cap a sandbox's lifetime.
       - workdir: Local, Safehouse (host directory used as the sandbox root),
                  Tensorlake, Daytona (command working directory; Tensorlake
                  defaults to /tmp)
@@ -34,6 +38,7 @@ class SandboxConfig:
     memory_mb: int = 1024
     disk_mb: int | None = None
     timeout_secs: int = 600
+    timeout_secs_explicit: bool = False
     image: str | None = None
     env_vars: dict[str, str] = field(default_factory=dict)
     allow_internet: bool = True

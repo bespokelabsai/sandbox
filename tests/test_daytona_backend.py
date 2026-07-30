@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import unittest
 
+from bespokelabs.sandbox import Sandbox, SandboxPreset
 from bespokelabs.sandbox.exceptions import SandboxConfigurationError, SandboxCreationError
 from bespokelabs.sandbox.types import SandboxConfig
 
@@ -202,18 +203,35 @@ class DaytonaDroppedConfigTests(unittest.TestCase):
         config = SandboxConfig(backend="daytona", snapshot_id="snap", **config_kwargs)
         return _build_params(config, create_token="tok")
 
-    def test_timeout_secs_is_not_silently_dropped(self) -> None:
+    def test_explicit_timeout_secs_is_not_silently_dropped(self) -> None:
         # The 24h lifetime a caller asks for has to arrive as a real bound.
-        self.assertEqual(self._params(timeout_secs=24 * 60 * 60).ttl_minutes, 1440)
+        params = self._params(timeout_secs=24 * 60 * 60, timeout_secs_explicit=True)
+        self.assertEqual(params.ttl_minutes, 1440)
 
-    def test_timeout_secs_rounds_up_and_never_floors_to_zero(self) -> None:
+    def test_explicit_timeout_secs_rounds_up_and_never_floors_to_zero(self) -> None:
         # ttl_minutes=0 means "no TTL" to Daytona, the opposite of a 30s bound.
-        self.assertEqual(self._params(timeout_secs=30).ttl_minutes, 1)
-        self.assertEqual(self._params(timeout_secs=90).ttl_minutes, 2)
+        self.assertEqual(self._params(timeout_secs=30, timeout_secs_explicit=True).ttl_minutes, 1)
+        self.assertEqual(self._params(timeout_secs=90, timeout_secs_explicit=True).ttl_minutes, 2)
 
-    def test_backend_options_can_still_override_the_derived_ttl(self) -> None:
-        params = self._params(timeout_secs=600, backend_options={"ttl_minutes": 5})
+    def test_unrequested_timeout_secs_sets_no_ttl_at_all(self) -> None:
+        # ttl_minutes destroys the sandbox in any state and no activity resets
+        # it, so a value nobody asked for must not become a lifetime cap: not
+        # the 600s dataclass default, and not the 1800s the agent presets
+        # recommend.
+        for timeout_secs in (600, 1800):
+            with self.subTest(timeout_secs=timeout_secs):
+                params = self._params(timeout_secs=timeout_secs)
+                self.assertIsNone(params.ttl_minutes)
+                self.assertNotIn("ttl_minutes", params.model_fields_set)
+
+    def test_backend_options_can_still_set_the_ttl(self) -> None:
+        # It overrides a derived TTL...
+        params = self._params(
+            timeout_secs=600, timeout_secs_explicit=True, backend_options={"ttl_minutes": 5}
+        )
         self.assertEqual(params.ttl_minutes, 5)
+        # ...and remains the way to ask for one without a timeout_secs.
+        self.assertEqual(self._params(backend_options={"ttl_minutes": 5}).ttl_minutes, 5)
 
     def test_workdir_is_not_silently_dropped(self) -> None:
         fake = _FakeDaytona()
@@ -257,6 +275,41 @@ class DaytonaDroppedConfigTests(unittest.TestCase):
             params.env_vars,
             {"ANTHROPIC_API_KEY": "secret", "SHARED": "from-options", "EXTRA": "1"},
         )
+
+
+class TimeoutSecsExplicitnessTests(unittest.TestCase):
+    """``Sandbox()`` must record whether ``timeout_secs`` came from the caller.
+
+    Daytona is the only backend that reads the flag -- it is what keeps a
+    default from becoming a hard wall-clock destroy -- but the wiring lives in
+    ``Sandbox.__init__``, so it is pinned here on the local backend, off the
+    network and without the Daytona SDK.
+    """
+
+    def _config(self, **kwargs) -> SandboxConfig:
+        sb = Sandbox("local", **kwargs)
+        self.addCleanup(sb.destroy)
+        return sb._config
+
+    def test_caller_supplied_timeout_secs_is_explicit(self) -> None:
+        config = self._config(timeout_secs=300)
+        self.assertEqual(config.timeout_secs, 300)
+        self.assertTrue(config.timeout_secs_explicit)
+
+    def test_omitted_timeout_secs_is_not_explicit(self) -> None:
+        config = self._config()
+        self.assertEqual(config.timeout_secs, 600)
+        self.assertFalse(config.timeout_secs_explicit)
+
+    def test_preset_timeout_secs_is_a_recommendation_not_a_request(self) -> None:
+        preset = SandboxPreset(name="_ttl_test", description="", timeout_secs=1800)
+
+        config = self._config(preset=preset)
+
+        # The preset's value still reaches the backends that read it...
+        self.assertEqual(config.timeout_secs, 1800)
+        # ...but it must not turn into a 30-minute destroy on Daytona.
+        self.assertFalse(config.timeout_secs_explicit)
 
 
 if __name__ == "__main__":

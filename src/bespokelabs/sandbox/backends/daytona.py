@@ -193,11 +193,29 @@ def _build_params(config: SandboxConfig, *, create_token: str) -> object:
         common["env_vars"] = config.env_vars
 
     # timeout_secs is documented as the sandbox's max lifetime, and ttl_minutes
-    # is the only absolute lifetime bound Daytona offers: auto_stop_interval,
-    # auto_archive_interval and auto_delete_interval are all *idle* timers, so
-    # they would never stop a busy sandbox and would stop an idle one early.
-    # Rounded up, and floored at Daytona's 1-minute granularity.
-    common["ttl_minutes"] = max(1, math.ceil(config.timeout_secs / 60))
+    # is the only absolute bound Daytona offers, so that is what it maps to.
+    # The auto_* intervals cannot stand in.  Per
+    # https://www.daytona.io/docs/en/sandboxes/#automated-lifecycle-management
+    # auto_stop_interval is an *idle* timer (default 15 minutes) that "triggers
+    # even if there are internal processes running", but its clock is reset by
+    # every Toolbox API call -- which is what every exec, file read and file
+    # write in this backend is.  A sandbox a driver polls every 10s therefore
+    # never trips it.  auto_archive_interval, auto_delete_interval and
+    # ephemeral only start counting once a sandbox is *stopped*, so they never
+    # fire on one that never stops.  Nothing but ttl_minutes bounds it.
+    #
+    # But ttl_minutes (same page, #wall-clock-ttl) destroys the sandbox "in any
+    # state: started, stopped, paused, or archived", counts wall-clock from
+    # creation (snapshot pull and boot included), and is reset by no activity
+    # at all.  That is a lifetime cap, not a recommendation, so it is set only
+    # from a timeout_secs the caller actually asked for -- never from the
+    # preset or dataclass default, which would silently kill running work at
+    # 30 or 10 minutes.
+    #
+    # Rounded up, and floored at Daytona's 1-minute granularity, because
+    # ttl_minutes=0 means "no TTL" -- the opposite of a sub-minute bound.
+    if config.timeout_secs_explicit:
+        common["ttl_minutes"] = max(1, math.ceil(config.timeout_secs / 60))
 
     if options:
         # backend_options wins, as the documented escape hatch -- except that
