@@ -73,6 +73,15 @@ IMAGE_REGISTRY = "ghcr.io/bespokelabsai/sandbox"
 #     them (v1 images were slim-based and lacked git).
 PRESET_IMAGE_TAG = "v2"
 
+
+def _tensorlake_npm_install(packages: str) -> str:
+    return (
+        "mkdir -p $HOME/.npm-global && "
+        "npm config set prefix $HOME/.npm-global && "
+        f"npm install -g {packages}"
+    )
+
+
 # -- Agent presets ---------------------------------------------------------
 
 register_preset(SandboxPreset(
@@ -84,7 +93,7 @@ register_preset(SandboxPreset(
     ],
     backend_setup_commands={
         "tensorlake": [
-            "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g @anthropic-ai/claude-code",
+            _tensorlake_npm_install("@anthropic-ai/claude-code"),
         ],
     },
     memory_mb=2048,
@@ -100,7 +109,7 @@ register_preset(SandboxPreset(
     ],
     backend_setup_commands={
         "tensorlake": [
-            "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g @openai/codex",
+            _tensorlake_npm_install("@openai/codex"),
         ],
     },
     memory_mb=2048,
@@ -116,8 +125,7 @@ register_preset(SandboxPreset(
     ],
     backend_setup_commands={
         "tensorlake": [
-            "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && "
-            "npm install -g @anthropic-ai/claude-code @openai/codex",
+            _tensorlake_npm_install("@anthropic-ai/claude-code @openai/codex"),
         ],
     },
     memory_mb=2048,

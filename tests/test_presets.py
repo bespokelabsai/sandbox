@@ -7,8 +7,8 @@ from bespokelabs.sandbox import Sandbox
 from bespokelabs.sandbox.presets import PRESETS, SandboxPreset, get_preset, register_preset
 from bespokelabs.sandbox.types import SandboxResult
 
-
 BUILT_IN_PRESETS = {"claude-code", "claude-code-codex", "codex"}
+TENSORLAKE_NPM_PREFIX = "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g"
 
 
 class PresetTests(unittest.TestCase):
@@ -24,7 +24,7 @@ class PresetTests(unittest.TestCase):
         self.assertEqual(
             preset.backend_setup_commands["tensorlake"],
             [
-                "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g @openai/codex",
+                f"{TENSORLAKE_NPM_PREFIX} @openai/codex",
             ],
         )
         self.assertEqual(preset.memory_mb, 2048)
@@ -40,7 +40,7 @@ class PresetTests(unittest.TestCase):
         self.assertEqual(
             preset.backend_setup_commands["tensorlake"],
             [
-                "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g @anthropic-ai/claude-code",
+                f"{TENSORLAKE_NPM_PREFIX} @anthropic-ai/claude-code",
             ],
         )
         self.assertEqual(preset.memory_mb, 2048)
@@ -138,7 +138,7 @@ class PresetImageResolutionTests(unittest.TestCase):
 
         self.assertIsNone(sb._config.image)
         sb._session.execute_command.assert_called_once_with(
-            "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g @anthropic-ai/claude-code"
+            f"{TENSORLAKE_NPM_PREFIX} @anthropic-ai/claude-code"
         )
 
     def test_backend_only_setup_commands_run(self) -> None:

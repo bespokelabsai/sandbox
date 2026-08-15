@@ -34,7 +34,11 @@ class RepoStats(BaseModel):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch GitHub repo stats via Codex in a sandbox")
-    parser.add_argument("--repo", default="bespokelabs/curator", help="GitHub owner/repo (default: bespokelabs/curator)")
+    parser.add_argument(
+        "--repo",
+        default="bespokelabs/curator",
+        help="GitHub owner/repo (default: bespokelabs/curator)",
+    )
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENAI_API_KEY", "")

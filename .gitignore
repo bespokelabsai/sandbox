@@ -1,9 +1,12 @@
 __pycache__/
 *.pyc
 *.pyo
+.DS_Store
 dist/
 build/
+.venv/
 *.egg-info/
 examples/.sandbox_workdir/
+examples/.venv/
 examples/__pycache__/
 .claude/
