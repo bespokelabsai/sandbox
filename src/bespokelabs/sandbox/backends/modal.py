@@ -35,6 +35,9 @@ class ModalClient:
                 "memory": config.memory_mb,
             }
 
+            if config.gpu is not None:
+                create_kwargs["gpu"] = config.gpu
+
             if config.image:
                 create_kwargs["image"] = modal.Image.from_registry(config.image)
 

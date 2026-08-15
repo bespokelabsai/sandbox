@@ -103,6 +103,23 @@ class AsyncSandboxClientLocalTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AsyncBackendClientReuseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_gpu_is_forwarded_to_config(self) -> None:
+        configs: list[object] = []
+
+        class RecordingBackendClient:
+            def create(self, config: object) -> mock.MagicMock:
+                configs.append(config)
+                return mock.MagicMock()
+
+        with mock.patch.dict(
+            "bespokelabs.sandbox.backends.BACKENDS",
+            {"modal": RecordingBackendClient},
+        ):
+            async with await AsyncSandbox.create("modal", gpu="H100"):
+                pass
+
+        self.assertEqual(configs[0].gpu, "H100")
+
     async def test_backend_client_constructed_once_across_concurrent_creates(self) -> None:
         instances: list[object] = []
 

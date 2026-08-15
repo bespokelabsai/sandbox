@@ -10,6 +10,7 @@ class SandboxConfig:
 
     Not all backends honour every field:
       - cpu / memory_mb: Daytona, Tensorlake, Modal, Docker
+      - gpu: Modal only (e.g. ``"L4"``, ``"A100"``, or ``"H100:2"``)
       - disk_mb: Daytona only (image-based sandboxes)
       - image: Modal, Daytona (OCI image), Docker (e.g. "python:3.12-slim"),
                Tensorlake (project-scoped image name, e.g. "tensorlake/ubuntu-minimal")
@@ -37,6 +38,7 @@ class SandboxConfig:
     cpu: float = 1.0
     memory_mb: int = 1024
     disk_mb: int | None = None
+    gpu: str | None = None
     timeout_secs: int = 600
     timeout_secs_explicit: bool = False
     image: str | None = None

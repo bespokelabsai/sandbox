@@ -17,7 +17,7 @@ Just like [OpenRouter](https://openrouter.ai) gives you a single API across LLM 
 
 - **No lock-in** — Your code works across all backends. Switch providers without rewriting a single line.
 - **Easily move between providers** — If one provider has an outage or capacity issue, change one string and keep running.
-- **Cost tracking** — Monitor and compare spend across providers. *(coming soon)*
+- **Cost tracking** — Track Claude Code token usage, estimated sandbox compute cost, and compare backend pricing.
 - **Automatic scheduling to lowest cost provider** — Let the library route your workloads to the cheapest available backend. *(coming soon)*
 
 ## Install
@@ -116,6 +116,7 @@ sb = Sandbox(
     cpu=1.0,              # vCPUs (Tensorlake, Modal, Docker, Daytona)
     memory_mb=1024,       # RAM in MB (Tensorlake, Modal, Docker, Daytona)
     disk_mb=None,         # Disk in MB (Daytona)
+    gpu=None,             # GPU type/count (Modal, e.g. "L4" or "H100:2")
     timeout_secs=600,     # Max lifetime / subprocess timeout
     image=None,           # Container image (Docker, Modal, Daytona)
     template=None,        # Template ID (E2B)
@@ -133,6 +134,17 @@ sb = Sandbox(
 ```
 
 Not every backend uses every parameter. Unsupported params are silently ignored.
+
+Modal GPU sandboxes accept Modal's GPU reservation strings, including a GPU
+type such as `gpu="L4"` or a type and count such as `gpu="H100:2"`:
+
+```python
+with Sandbox("modal", gpu="A100") as sb:
+    result = sb.execute_command("nvidia-smi")
+    print(result.stdout)
+```
+
+GPU sandboxes can be preempted, so GPU workloads should tolerate interruption.
 
 `timeout_secs` is a subprocess timeout on Local and Ray, a sandbox timeout on
 E2B and Modal, and on Daytona a wall-clock `ttl_minutes` deadline. Daytona
@@ -349,6 +361,20 @@ JSON output reports, so `llm_cost_usd` can be `0` under subscription auth that
 omits `total_cost_usd` (the token counts are still captured). The async
 `AsyncSandbox` exposes the same `run_agent(...)` / `usage`. This is distinct
 from `bespokelabs.sandbox.pricing`, which prices sandbox compute on its own.
+
+For standalone sandbox compute estimates, use the bundled pricing helpers:
+
+```python
+from bespokelabs.sandbox.pricing import cost_per_second, get_backend_pricing
+
+print(get_backend_pricing("modal"))          # raw bundled pricing metadata
+print(cost_per_second("modal", vcpu=2.0))    # estimated $/sec for a sandbox
+```
+
+Pricing data is best-effort and local to the installed package. To compare
+available backends for a real workload, see
+[`examples/find_cheapest.py`](examples/find_cheapest.py), which benchmarks
+cold-start and execution time, then estimates cost with the same pricing data.
 
 ### Presets
 

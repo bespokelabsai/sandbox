@@ -92,7 +92,10 @@ def print_table(results: list[BenchmarkResult]) -> None:
     print("-" * 70)
     for r in results:
         status = "yes" if r.success else f"no  {r.error[:30]}"
-        print(f"{r.backend:<12} {r.cold_start_secs:<10} {r.exec_secs:<10} {r.total_secs:<10} {r.estimated_cost_usd:<14.8f} {status}")
+        print(
+            f"{r.backend:<12} {r.cold_start_secs:<10} {r.exec_secs:<10} "
+            f"{r.total_secs:<10} {r.estimated_cost_usd:<14.8f} {status}"
+        )
 
     successful = [r for r in results if r.success]
     if successful:
