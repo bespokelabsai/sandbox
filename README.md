@@ -123,7 +123,7 @@ sb = Sandbox(
     allow_internet=True,  # Network access (Docker, Tensorlake, Daytona)
     app_name=None,        # App name (Modal)
     snapshot_id=None,     # Restore from snapshot (Tensorlake, Modal)
-    workdir=None,         # Host directory to use as sandbox root (Safehouse)
+    workdir=None,         # Sandbox root (Safehouse) / command working dir (Tensorlake, Daytona)
     backend_options=None, # dict merged into the backend's native create call
     files=None,           # {path: bytes|str} written into the sandbox on create
     git_repo=None,        # repo URL cloned into the sandbox on create
@@ -133,6 +133,15 @@ sb = Sandbox(
 ```
 
 Not every backend uses every parameter. Unsupported params are silently ignored.
+
+`timeout_secs` is a subprocess timeout on Local and Ray, a sandbox timeout on
+E2B and Modal, and on Daytona a wall-clock `ttl_minutes` deadline. Daytona
+destroys the sandbox when that deadline elapses in whatever state it is in,
+running work included; no activity resets the clock, and the clock starts at
+creation, so image pull and boot count against it. The mapping happens only
+when you pass `timeout_secs` yourself. Omit it — including when a preset
+supplies its own recommended value — and the Daytona sandbox gets no TTL at
+all, leaving it bounded only by Daytona's default 15-minute idle auto-stop.
 
 Constructing a `Sandbox` creates the underlying sandbox immediately. To launch
 many sandboxes on one backend, or to use `async`/`await`, see
@@ -527,6 +536,11 @@ with Sandbox("docker", backend_options={"hostname": "build-box"}) as sb:
     sb.execute_command("hostname")
 ```
 
+On Daytona, `env_vars` given here is merged over the `env_vars=` parameter
+rather than replacing it, and `create_timeout` (seconds) is consumed by the SDK
+adapter to bound the create call itself instead of being passed as a sandbox
+parameter.
+
 ### Session state (resume)
 
 A **snapshot** saves state to restore later; **session state** is a
@@ -558,7 +572,7 @@ materialization are skipped.
 | E2B | sandbox id (`Sandbox.connect`) | `sandbox_id` |
 | Modal | sandbox id (`Sandbox.from_id`) | `sandbox_id` |
 | Tensorlake | sandbox id (`client.connect`) | `sandbox_id` |
-| Daytona | sandbox id (`client.get`) | `sandbox_id` |
+| Daytona | sandbox id (`client.get`) | `sandbox_id`, `workdir` (when set) |
 | Local, Safehouse | host workdir | `workdir`, env overlay |
 | Ray | — (not supported) | raises `FeatureNotSupportedError` |
 

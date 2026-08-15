@@ -121,6 +121,7 @@ class Sandbox:
             memory_mb=memory_mb if memory_mb is not None else defaults.memory_mb,
             disk_mb=disk_mb,
             timeout_secs=timeout_secs if timeout_secs is not None else defaults.timeout_secs,
+            timeout_secs_explicit=timeout_secs is not None,
             image=image if image is not None else preset_image_for_backend,
             env_vars={**defaults.env_vars, **(env_vars or {})},
             allow_internet=allow_internet if allow_internet is not None else defaults.allow_internet,
