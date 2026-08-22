@@ -1,3 +1,5 @@
+"""Synchronous public sandbox and sandbox-client APIs."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -10,8 +12,17 @@ from pathlib import Path
 from typing import TypeVar, overload
 
 from bespokelabs.sandbox import _transfer, pricing
-from bespokelabs.sandbox._usage import parse_claude_result, result_text, usage_from_result
-from bespokelabs.sandbox.agents import AgentCapability, AgentContext, AgentSession, AgentSpec
+from bespokelabs.sandbox._usage import (
+    parse_claude_result,
+    result_text,
+    usage_from_result,
+)
+from bespokelabs.sandbox.agents import (
+    AgentCapability,
+    AgentContext,
+    AgentSession,
+    AgentSpec,
+)
 from bespokelabs.sandbox.backends import BACKENDS
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
@@ -21,8 +32,16 @@ from bespokelabs.sandbox.exceptions import (
     SandboxError,
     SandboxExecutionError,
 )
-from bespokelabs.sandbox.presets import PRESETS, SandboxPreset, get_preset, register_preset
-from bespokelabs.sandbox.protocols import SandboxBackendClient, SandboxBackendSession
+from bespokelabs.sandbox.presets import (
+    PRESETS,
+    SandboxPreset,
+    get_preset,
+    register_preset,
+)
+from bespokelabs.sandbox.protocols import (
+    SandboxBackendClient,
+    SandboxBackendSession,
+)
 from bespokelabs.sandbox.types import (
     AgentRunResult,
     FileInfo,
@@ -40,8 +59,10 @@ T = TypeVar("T")
 
 
 class Sandbox:
-    """A live sandbox session with a unified interface across Local, Safehouse,
-    Docker, Ray, Daytona, Tensorlake, Modal, and E2B.
+    """A live sandbox session with a unified interface across backends.
+
+    Supported backends are Local, Safehouse, Docker, Ray, Daytona, Tensorlake,
+    Modal, and E2B.
 
     Usage:
         with Sandbox("safehouse", timeout_secs=300) as sb:
@@ -115,18 +136,28 @@ class Sandbox:
 
         # Merge: explicit kwargs override preset defaults.  Without a
         # preset, an empty SandboxPreset supplies the standard defaults.
-        defaults = resolved_preset if resolved_preset is not None else SandboxPreset(name="", description="")
+        defaults = (
+            resolved_preset
+            if resolved_preset is not None
+            else SandboxPreset(name="", description="")
+        )
         self._config = SandboxConfig(
             backend=backend,
             cpu=cpu if cpu is not None else defaults.cpu,
-            memory_mb=memory_mb if memory_mb is not None else defaults.memory_mb,
+            memory_mb=memory_mb
+            if memory_mb is not None
+            else defaults.memory_mb,
             disk_mb=disk_mb,
             gpu=gpu,
-            timeout_secs=timeout_secs if timeout_secs is not None else defaults.timeout_secs,
+            timeout_secs=timeout_secs
+            if timeout_secs is not None
+            else defaults.timeout_secs,
             timeout_secs_explicit=timeout_secs is not None,
             image=image if image is not None else preset_image_for_backend,
             env_vars={**defaults.env_vars, **(env_vars or {})},
-            allow_internet=allow_internet if allow_internet is not None else defaults.allow_internet,
+            allow_internet=allow_internet
+            if allow_internet is not None
+            else defaults.allow_internet,
             app_name=app_name,
             template=template,
             snapshot_id=snapshot_id,
@@ -134,12 +165,18 @@ class Sandbox:
             backend_options=backend_options or {},
         )
         self._preset = resolved_preset
-        backend_client = _backend_client if _backend_client is not None else BACKENDS[backend]()
+        backend_client = (
+            _backend_client
+            if _backend_client is not None
+            else BACKENDS[backend]()
+        )
         self._destroyed = False
         self._usage = Usage()
 
         try:
-            self._session: SandboxBackendSession = backend_client.create(self._config)
+            self._session: SandboxBackendSession = backend_client.create(
+                self._config
+            )
         except (SandboxError, BackendNotInstalledError):
             raise
         except Exception as exc:
@@ -152,11 +189,11 @@ class Sandbox:
         # Skip setup commands if the preset image was used (everything
         # is already baked into the image).  Fall back to setup_commands
         # for backends that don't support images (local, ray, etc.).
-        _IMAGE_BACKENDS = {"docker", "daytona", "modal", "tensorlake"}
+        image_backends = {"docker", "daytona", "modal", "tensorlake"}
         using_preset_image = (
             preset_image_for_backend is not None
             and self._config.image == preset_image_for_backend
-            and backend in _IMAGE_BACKENDS
+            and backend in image_backends
         )
         # Materialize the workspace, then run setup. The repo is cloned
         # first so files= can overlay onto it, and setup commands can
@@ -178,13 +215,23 @@ class Sandbox:
     # -- Core operations ---------------------------------------------------
 
     @overload
-    def execute_code(self, code: str, language: str = "python") -> SandboxResult: ...
+    def execute_code(
+        self, code: str, language: str = "python"
+    ) -> SandboxResult:
+        ...
 
     @overload
-    def execute_code(self, code: str, language: str = "python", *, return_type: type[T]) -> T: ...
+    def execute_code(
+        self, code: str, language: str = "python", *, return_type: type[T]
+    ) -> T:
+        ...
 
     def execute_code(
-        self, code: str, language: str = "python", *, return_type: type[T] | None = None
+        self,
+        code: str,
+        language: str = "python",
+        *,
+        return_type: type[T] | None = None,
     ) -> SandboxResult | T:
         """Execute a code snippet and return stdout/stderr/exit_code.
 
@@ -200,12 +247,21 @@ class Sandbox:
         return result
 
     @overload
-    def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult: ...
+    def execute_command(
+        self, command: str, args: list[str] | None = None
+    ) -> SandboxResult:
+        ...
 
     @overload
     def execute_command(
-        self, command: str, args: list[str] | None = None, *, return_type: type[T], inject_schema: bool = ...
-    ) -> T: ...
+        self,
+        command: str,
+        args: list[str] | None = None,
+        *,
+        return_type: type[T],
+        inject_schema: bool = ...,
+    ) -> T:
+        ...
 
     def execute_command(
         self,
@@ -271,7 +327,9 @@ class Sandbox:
         self._check_alive()
         self._session.download_file(remote_path, local_path)
 
-    def upload_dir(self, local_dir: str | Path, remote_dir: str, *, method: str = "auto") -> int:
+    def upload_dir(
+        self, local_dir: str | Path, remote_dir: str, *, method: str = "auto"
+    ) -> int:
         """Upload a local directory tree into the sandbox; return the file count.
 
         The single-file analogues are :meth:`upload_file` (one file) and
@@ -296,7 +354,9 @@ class Sandbox:
         self._check_alive()
         return _transfer.upload_dir(self, local_dir, remote_dir, method=method)
 
-    def download_dir(self, remote_dir: str, local_dir: str | Path, *, method: str = "auto") -> int:
+    def download_dir(
+        self, remote_dir: str, local_dir: str | Path, *, method: str = "auto"
+    ) -> int:
         """Download a directory tree from the sandbox to a local path; return the file count.
 
         The directory counterpart of :meth:`download_file`.  Walks
@@ -306,7 +366,9 @@ class Sandbox:
         to a per-file loop when ``tar`` is unavailable.
         """
         self._check_alive()
-        return _transfer.download_dir(self, remote_dir, local_dir, method=method)
+        return _transfer.download_dir(
+            self, remote_dir, local_dir, method=method
+        )
 
     # -- Lifecycle ---------------------------------------------------------
 
@@ -341,7 +403,9 @@ class Sandbox:
         self._check_alive()
         return AgentSession(self, spec)
 
-    def agent_tools(self, capabilities: list[AgentCapability] | None = None) -> AgentContext:
+    def agent_tools(
+        self, capabilities: list[AgentCapability] | None = None
+    ) -> AgentContext:
         """Return a capability-checked context for an outside agent."""
         self._check_alive()
         return AgentContext(self, capabilities)
@@ -480,7 +544,10 @@ class Sandbox:
                     f"exit_code={result.exit_code}\nstderr={result.stderr}",
                     backend=self._config.backend,
                     op="preset_setup",
-                    context={"preset": preset.name, "exit_code": result.exit_code},
+                    context={
+                        "preset": preset.name,
+                        "exit_code": result.exit_code,
+                    },
                 )
 
     def _clone_repo(self, repo: str, ref: str | None) -> None:
@@ -511,6 +578,7 @@ class Sandbox:
         config: SandboxConfig,
     ) -> Sandbox:
         """Wrap an existing live backend session (used by resume)."""
+        del backend  # Unused; retained for compatibility with existing callers.
         sb = object.__new__(cls)
         sb._config = config
         sb._preset = None
@@ -541,7 +609,9 @@ class Sandbox:
                 backend=backend_name,
                 op="resume",
             ) from exc
-        return cls._from_session(backend_name, session, SandboxConfig(backend=backend_name))
+        return cls._from_session(
+            backend_name, session, SandboxConfig(backend=backend_name)
+        )
 
 
 class SandboxClient:
@@ -632,7 +702,9 @@ class SandboxClient:
         Resume skips preset setup and workspace materialization — the
         sandbox is returned exactly as it is running.
         """
-        return Sandbox._resume_with(self._backend_name, self._backend_client, state)
+        return Sandbox._resume_with(
+            self._backend_name, self._backend_client, state
+        )
 
 
 # -- Structured output parsing ------------------------------------------------
@@ -763,6 +835,10 @@ def json_schema(cls: type) -> str:
             # get_type_hints returns actual type objects; use __name__ for clean output
             name = getattr(tp, "__name__", str(tp))
             parts.append(f"{f.name} ({name})")
-        return "Return ONLY a JSON object with these fields: " + ", ".join(parts) + "."
+        return (
+            "Return ONLY a JSON object with these fields: "
+            + ", ".join(parts)
+            + "."
+        )
 
     return "Return ONLY a JSON object."

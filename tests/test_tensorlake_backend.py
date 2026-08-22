@@ -21,13 +21,22 @@ class _FakeTensorlakeSandbox:
 
 
 class TensorlakeSessionTests(unittest.TestCase):
-    def test_execute_command_runs_from_default_writable_workdir_with_user_npm_path(self) -> None:
+
+    def test_execute_command_runs_from_default_writable_workdir_with_user_npm_path(
+        self,
+    ) -> None:
         sandbox = _FakeTensorlakeSandbox()
         session = TensorlakeSession(client=object(), sandbox=sandbox)
 
         result = session.execute_command(
             "git",
-            ["clone", "--depth", "1", "https://github.com/acme/project.git", "project"],
+            [
+                "clone",
+                "--depth",
+                "1",
+                "https://github.com/acme/project.git",
+                "project",
+            ],
         )
 
         self.assertEqual(result.exit_code, 0)

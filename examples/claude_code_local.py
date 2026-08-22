@@ -27,7 +27,9 @@ WORKDIR = os.path.join(os.path.dirname(__file__), ".sandbox_workdir")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Claude Code in a local sandbox")
+    parser = argparse.ArgumentParser(
+        description="Claude Code in a local sandbox"
+    )
     parser.add_argument(
         "--resume",
         action="store_true",
@@ -102,16 +104,20 @@ def flatten(lst):
         # Per-call token usage and cost for this run.
         u = result.usage
         print("--- usage (this call) ---")
-        print(f"tokens: {u.input_tokens} in / {u.output_tokens} out "
-              f"(+{u.cache_read_tokens} cache read, {u.cache_creation_tokens} cache write)")
+        print(
+            f"tokens: {u.input_tokens} in / {u.output_tokens} out "
+            f"(+{u.cache_read_tokens} cache read, {u.cache_creation_tokens} cache write)"
+        )
         print(f"llm cost:     ${u.llm_cost_usd:.4f}")
         print(f"compute cost: ${u.compute_cost_usd:.4f}")
         print(f"total cost:   ${u.total_cost_usd:.4f}")
 
         # sb.usage is the running total across every run_agent call in this
         # sandbox's lifetime (here, just one).
-        print(f"--- sandbox total: ${sb.usage.total_cost_usd:.4f} "
-              f"over {sb.usage.total_tokens} tokens ---")
+        print(
+            f"--- sandbox total: ${sb.usage.total_cost_usd:.4f} "
+            f"over {sb.usage.total_tokens} tokens ---"
+        )
 
 
 if __name__ == "__main__":

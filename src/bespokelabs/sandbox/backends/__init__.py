@@ -1,3 +1,5 @@
+"""Backend client registry."""
+
 from __future__ import annotations
 
 from bespokelabs.sandbox.backends.daytona import DaytonaClient

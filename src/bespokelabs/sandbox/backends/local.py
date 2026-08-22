@@ -1,3 +1,5 @@
+"""Local subprocess sandbox backend."""
+
 from __future__ import annotations
 
 import os
@@ -17,7 +19,12 @@ from bespokelabs.sandbox.exceptions import (
     SandboxCreationError,
     SandboxExecutionError,
 )
-from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
+from bespokelabs.sandbox.types import (
+    FileInfo,
+    SandboxConfig,
+    SandboxResult,
+    SnapshotInfo,
+)
 
 
 class LocalClient:
@@ -39,7 +46,9 @@ class LocalClient:
                 env_overlay=config.env_vars or {},
             )
         except Exception as exc:
-            raise SandboxCreationError(f"Failed to create local sandbox: {exc}") from exc
+            raise SandboxCreationError(
+                f"Failed to create local sandbox: {exc}"
+            ) from exc
 
     def resume(self, data: dict) -> LocalSession:
         workdir = data.get("workdir")
@@ -70,7 +79,14 @@ class LocalSession:
     write_file("/hello.txt", ...).
     """
 
-    def __init__(self, *, workdir: str, owns_workdir: bool, timeout: int, env_overlay: dict[str, str]) -> None:
+    def __init__(
+        self,
+        *,
+        workdir: str,
+        owns_workdir: bool,
+        timeout: int,
+        env_overlay: dict[str, str],
+    ) -> None:
         self._workdir: str | None = workdir
         self._owns_workdir = owns_workdir
         self._timeout = timeout
@@ -81,16 +97,20 @@ class LocalSession:
         self._env["SANDBOX_ROOT"] = workdir
         self._env["HOME"] = workdir
 
-    def execute_code(self, code: str, language: str = "python") -> SandboxResult:
+    def execute_code(
+        self, code: str, language: str = "python"
+    ) -> SandboxResult:
         resolved = self._resolve_interpreter(language)
         if is_python_language(language):
-            code = PYTHON_PREAMBLE + (
-                "exec(compile(%r, \"<sandbox>\", \"exec\"), globals())\n" % code
+            code = (
+                PYTHON_PREAMBLE
+                + f'exec(compile({code!r}, "<sandbox>", "exec"), globals())\n'
             )
         try:
             result = subprocess.run(
                 [resolved, "-c", code],
                 capture_output=True,
+                check=False,
                 text=True,
                 timeout=self._timeout,
                 cwd=self._workdir,
@@ -108,13 +128,20 @@ class LocalSession:
                 exit_code=124,
             )
         except Exception as exc:
-            raise SandboxExecutionError(f"Local code execution failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Local code execution failed: {exc}"
+            ) from exc
 
-    def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult:
+    def execute_command(
+        self, command: str, args: list[str] | None = None
+    ) -> SandboxResult:
         try:
             if args:
-                if (command in ("sh", "bash", "zsh")
-                        and len(args) >= 2 and args[0] == "-c"):
+                if (
+                    command in ("sh", "bash", "zsh")
+                    and len(args) >= 2
+                    and args[0] == "-c"
+                ):
                     # Nested shell: route through the prelude so that both
                     # command arguments and redirections are rebased.
                     shell_cmd = rewrite_redirects(args[1])
@@ -132,6 +159,7 @@ class LocalSession:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
+                check=False,
                 text=True,
                 timeout=self._timeout,
                 cwd=self._workdir,
@@ -149,16 +177,22 @@ class LocalSession:
                 exit_code=124,
             )
         except Exception as exc:
-            raise SandboxExecutionError(f"Local command execution failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Local command execution failed: {exc}"
+            ) from exc
 
     def list_files(self, path: str = "/") -> list[FileInfo]:
         try:
             resolved = self._resolve_path(path)
             p = pathlib.Path(resolved)
             if not p.exists():
-                raise SandboxExecutionError(f"Local list_files failed: path '{path}' does not exist")
+                raise SandboxExecutionError(
+                    f"Local list_files failed: path '{path}' does not exist"
+                )
             if not p.is_dir():
-                raise SandboxExecutionError(f"Local list_files failed: '{path}' is not a directory")
+                raise SandboxExecutionError(
+                    f"Local list_files failed: '{path}' is not a directory"
+                )
             return [
                 FileInfo(
                     path=self._to_sandbox_path(entry),
@@ -170,14 +204,18 @@ class LocalSession:
         except SandboxExecutionError:
             raise
         except Exception as exc:
-            raise SandboxExecutionError(f"Local list_files failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Local list_files failed: {exc}"
+            ) from exc
 
     def read_file(self, path: str) -> bytes:
         try:
             resolved = self._resolve_path(path)
             return pathlib.Path(resolved).read_bytes()
         except Exception as exc:
-            raise SandboxExecutionError(f"Local read_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Local read_file failed: {exc}"
+            ) from exc
 
     def write_file(self, path: str, content: bytes | str) -> None:
         try:
@@ -187,9 +225,11 @@ class LocalSession:
             if isinstance(content, bytes):
                 p.write_bytes(content)
             else:
-                p.write_text(content)
+                p.write_text(content, encoding="utf-8")
         except Exception as exc:
-            raise SandboxExecutionError(f"Local write_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Local write_file failed: {exc}"
+            ) from exc
 
     def upload_file(self, local_path: str, remote_path: str) -> None:
         try:
@@ -198,14 +238,18 @@ class LocalSession:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(local_path, dest)
         except Exception as exc:
-            raise SandboxExecutionError(f"Local upload_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Local upload_file failed: {exc}"
+            ) from exc
 
     def download_file(self, remote_path: str, local_path: str) -> None:
         try:
             resolved = self._resolve_path(remote_path)
             shutil.copy2(resolved, local_path)
         except Exception as exc:
-            raise SandboxExecutionError(f"Local download_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Local download_file failed: {exc}"
+            ) from exc
 
     def snapshot(self) -> SnapshotInfo:
         raise FeatureNotSupportedError(
@@ -222,7 +266,11 @@ class LocalSession:
 
     def destroy(self) -> None:
         try:
-            if self._owns_workdir and self._workdir and os.path.exists(self._workdir):
+            if (
+                self._owns_workdir
+                and self._workdir
+                and os.path.exists(self._workdir)
+            ):
                 shutil.rmtree(self._workdir, ignore_errors=True)
         except Exception:
             pass

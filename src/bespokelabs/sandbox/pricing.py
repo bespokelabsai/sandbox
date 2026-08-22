@@ -11,20 +11,18 @@ Usage:
 
 from __future__ import annotations
 
+import functools
 import json
 from pathlib import Path
 
 _PRICING_PATH = Path(__file__).parent / "pricing.json"
-_cache: dict | None = None
 
 
+@functools.cache
 def get_pricing() -> dict:
     """Return the full pricing dict from pricing.json."""
-    global _cache
-    if _cache is None:
-        with open(_PRICING_PATH) as f:
-            _cache = json.load(f)
-    return _cache
+    with _PRICING_PATH.open(encoding="utf-8") as pricing_file:
+        return json.load(pricing_file)
 
 
 def get_backend_pricing(backend: str) -> dict | None:
@@ -32,7 +30,9 @@ def get_backend_pricing(backend: str) -> dict | None:
     return get_pricing()["backends"].get(backend)
 
 
-def cost_per_second(backend: str, vcpu: float = 1.0, ram_gib: float = 1.0) -> float:
+def cost_per_second(
+    backend: str, vcpu: float = 1.0, ram_gib: float = 1.0
+) -> float:
     """Estimated cost per second for a backend at the given resource level.
 
     Returns 0.0 for free/local backends or unknown backends.
@@ -47,4 +47,4 @@ def cost_per_second(backend: str, vcpu: float = 1.0, ram_gib: float = 1.0) -> fl
 
 def list_backends() -> list[str]:
     """Return the list of backends with pricing data."""
-    return list(get_pricing()["backends"].keys())
+    return list(get_pricing()["backends"])

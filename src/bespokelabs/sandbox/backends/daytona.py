@@ -1,3 +1,5 @@
+"""Daytona sandbox backend."""
+
 from __future__ import annotations
 
 import logging
@@ -15,7 +17,12 @@ from bespokelabs.sandbox.exceptions import (
     SandboxCreationError,
     SandboxExecutionError,
 )
-from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
+from bespokelabs.sandbox.types import (
+    FileInfo,
+    SandboxConfig,
+    SandboxResult,
+    SnapshotInfo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +46,10 @@ class DaytonaClient:
 
     def __init__(self) -> None:
         try:
-            from daytona import Daytona, DaytonaConfig  # type: ignore[import-untyped]
+            from daytona import (  # type: ignore[import-untyped]
+                Daytona,
+                DaytonaConfig,
+            )
         except ImportError as exc:
             raise BackendNotInstalledError(
                 "Daytona SDK not installed. Run: pip install bespokelabs-sandbox[daytona]"
@@ -57,17 +67,25 @@ class DaytonaClient:
                 if self._client is None:
                     api_key = os.environ.get("DAYTONA_API_KEY")
                     if not api_key:
-                        raise SandboxCreationError("DAYTONA_API_KEY environment variable is not set")
-                    self._client = self._daytona_cls(self._daytona_config_cls(
-                        api_key=api_key,
-                        api_url=os.environ.get("DAYTONA_API_URL", "https://app.daytona.io/api"),
-                        target=os.environ.get("DAYTONA_TARGET", "us"),
-                    ))
+                        raise SandboxCreationError(
+                            "DAYTONA_API_KEY environment variable is not set"
+                        )
+                    self._client = self._daytona_cls(
+                        self._daytona_config_cls(
+                            api_key=api_key,
+                            api_url=os.environ.get(
+                                "DAYTONA_API_URL", "https://app.daytona.io/api"
+                            ),
+                            target=os.environ.get("DAYTONA_TARGET", "us"),
+                        )
+                    )
         return self._client
 
     def resume(self, data: dict) -> DaytonaSession:
         client = self._ensure_client()
-        getter = getattr(client, "get", None) or getattr(client, "find_one", None)
+        getter = getattr(client, "get", None) or getattr(
+            client, "find_one", None
+        )
         if getter is None:
             raise FeatureNotSupportedError(
                 "This Daytona SDK version has no get()/find_one(); cannot resume by id"
@@ -78,7 +96,9 @@ class DaytonaClient:
             raise SandboxCreationError(
                 f"Cannot resume Daytona sandbox '{data.get('sandbox_id')}': {exc}"
             ) from exc
-        return DaytonaSession(client=client, sandbox=sandbox, workdir=data.get("workdir"))
+        return DaytonaSession(
+            client=client, sandbox=sandbox, workdir=data.get("workdir")
+        )
 
     def create(self, config: SandboxConfig) -> DaytonaSession:
         self._ensure_client()
@@ -97,13 +117,17 @@ class DaytonaClient:
                 sandbox.process.exec(f"mkdir -p {shlex.quote(config.workdir)}")
         except Exception as exc:
             self._reap_orphan(create_token)
-            raise SandboxCreationError(f"Failed to create Daytona sandbox: {exc}") from exc
+            raise SandboxCreationError(
+                f"Failed to create Daytona sandbox: {exc}"
+            ) from exc
         except BaseException:
             # KeyboardInterrupt / SystemExit: still reap, then propagate as-is.
             self._reap_orphan(create_token)
             raise
 
-        return DaytonaSession(client=self._client, sandbox=sandbox, workdir=config.workdir)
+        return DaytonaSession(
+            client=self._client, sandbox=sandbox, workdir=config.workdir
+        )
 
     def _reap_orphan(self, create_token: str) -> None:
         """Delete the sandbox a failed create may have left running.
@@ -120,9 +144,13 @@ class DaytonaClient:
         can never mask the creation error the caller actually needs to see.
         """
         try:
-            from daytona import ListSandboxesQuery  # type: ignore[import-untyped]
+            from daytona import (
+                ListSandboxesQuery,  # type: ignore[import-untyped]
+            )
 
-            query = ListSandboxesQuery(labels={_CREATE_TOKEN_LABEL: create_token})
+            query = ListSandboxesQuery(
+                labels={_CREATE_TOKEN_LABEL: create_token}
+            )
             # list() is a generator, so materialize it inside the guard.
             orphans = list(self._client.list(query))
         except Exception:
@@ -147,7 +175,8 @@ class DaytonaClient:
                 )
             else:
                 logger.warning(
-                    "Deleted Daytona sandbox %s orphaned by a failed create.", orphan_id
+                    "Deleted Daytona sandbox %s orphaned by a failed create.",
+                    orphan_id,
                 )
 
 
@@ -181,12 +210,19 @@ def _build_params(config: SandboxConfig, *, create_token: str) -> object:
     label lands on every sandbox.  ``Daytona.create(params)`` with neither a
     snapshot nor an image behaves exactly like ``Daytona.create()``.
     """
-    from daytona import CreateSandboxFromImageParams, CreateSandboxFromSnapshotParams  # type: ignore[import-untyped]
+    from daytona import (  # type: ignore[import-untyped]
+        CreateSandboxFromImageParams,
+        CreateSandboxFromSnapshotParams,
+    )
     from daytona.common.sandbox import Resources  # type: ignore[import-untyped]
 
     # _CREATE_TIMEOUT_OPTION targets Daytona.create(), not the params object;
     # leaving it in would be silently swallowed (params ignore extra fields).
-    options = {k: v for k, v in config.backend_options.items() if k != _CREATE_TIMEOUT_OPTION}
+    options = {
+        k: v
+        for k, v in config.backend_options.items()
+        if k != _CREATE_TIMEOUT_OPTION
+    }
 
     common: dict = {}
     if config.env_vars:
@@ -228,7 +264,10 @@ def _build_params(config: SandboxConfig, *, create_token: str) -> object:
 
     # Stamped after backend_options so a caller's labels can add to the reap
     # handle but never replace it.
-    common["labels"] = {**(common.get("labels") or {}), _CREATE_TOKEN_LABEL: create_token}
+    common["labels"] = {
+        **(common.get("labels") or {}),
+        _CREATE_TOKEN_LABEL: create_token,
+    }
 
     if config.image:
         # Build resources if non-default cpu or memory is specified
@@ -243,10 +282,14 @@ def _build_params(config: SandboxConfig, *, create_token: str) -> object:
             resources_kwargs["disk"] = math.ceil(config.disk_mb / 1024)
 
         resources = Resources(**resources_kwargs) if resources_kwargs else None
-        return CreateSandboxFromImageParams(image=config.image, resources=resources, **common)
+        return CreateSandboxFromImageParams(
+            image=config.image, resources=resources, **common
+        )
 
     if config.snapshot_id:
-        return CreateSandboxFromSnapshotParams(snapshot=config.snapshot_id, **common)
+        return CreateSandboxFromSnapshotParams(
+            snapshot=config.snapshot_id, **common
+        )
 
     return CreateSandboxFromSnapshotParams(**common)
 
@@ -260,12 +303,17 @@ class DaytonaSession:
     to file paths, which Daytona resolves against the sandbox root.
     """
 
-    def __init__(self, *, client: object, sandbox: object, workdir: str | None = None) -> None:
+    def __init__(
+        self, *, client: object, sandbox: object, workdir: str | None = None
+    ) -> None:
         self._client = client
         self._sandbox: object = sandbox
         self._workdir = workdir
 
-    def execute_code(self, code: str, language: str = "python") -> SandboxResult:
+    def execute_code(
+        self, code: str, language: str = "python"
+    ) -> SandboxResult:
+        del language  # Unused; the Daytona code endpoint executes Python.
         try:
             response = self._sandbox.process.code_run(code)
             return SandboxResult(
@@ -274,11 +322,19 @@ class DaytonaSession:
                 exit_code=getattr(response, "exit_code", 0) or 0,
             )
         except Exception as exc:
-            raise SandboxExecutionError(f"Daytona code execution failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Daytona code execution failed: {exc}"
+            ) from exc
 
-    def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult:
+    def execute_command(
+        self, command: str, args: list[str] | None = None
+    ) -> SandboxResult:
         try:
-            full_cmd = command if not args else f"{command} {' '.join(shlex.quote(a) for a in args)}"
+            full_cmd = (
+                command
+                if not args
+                else f"{command} {' '.join(shlex.quote(a) for a in args)}"
+            )
             response = self._sandbox.process.exec(full_cmd, cwd=self._workdir)
             return SandboxResult(
                 stdout=getattr(response, "result", "") or "",
@@ -286,7 +342,9 @@ class DaytonaSession:
                 exit_code=getattr(response, "exit_code", 0) or 0,
             )
         except Exception as exc:
-            raise SandboxExecutionError(f"Daytona command execution failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Daytona command execution failed: {exc}"
+            ) from exc
 
     def list_files(self, path: str = "/") -> list[FileInfo]:
         try:
@@ -300,28 +358,36 @@ class DaytonaSession:
                 for e in entries
             ]
         except Exception as exc:
-            raise SandboxExecutionError(f"Daytona list_files failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Daytona list_files failed: {exc}"
+            ) from exc
 
     def read_file(self, path: str) -> bytes:
         try:
             content = self._sandbox.fs.download_file(path)
             return content if isinstance(content, bytes) else content.encode()
         except Exception as exc:
-            raise SandboxExecutionError(f"Daytona read_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Daytona read_file failed: {exc}"
+            ) from exc
 
     def write_file(self, path: str, content: bytes | str) -> None:
         try:
             data = content if isinstance(content, bytes) else content.encode()
             self._sandbox.fs.upload_file(data, path)
         except Exception as exc:
-            raise SandboxExecutionError(f"Daytona write_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Daytona write_file failed: {exc}"
+            ) from exc
 
     def upload_file(self, local_path: str, remote_path: str) -> None:
         try:
             data = pathlib.Path(local_path).read_bytes()
             self._sandbox.fs.upload_file(data, remote_path)
         except Exception as exc:
-            raise SandboxExecutionError(f"Daytona upload_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Daytona upload_file failed: {exc}"
+            ) from exc
 
     def download_file(self, remote_path: str, local_path: str) -> None:
         try:
@@ -329,7 +395,9 @@ class DaytonaSession:
             content = data if isinstance(data, bytes) else data.encode()
             pathlib.Path(local_path).write_bytes(content)
         except Exception as exc:
-            raise SandboxExecutionError(f"Daytona download_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Daytona download_file failed: {exc}"
+            ) from exc
 
     def snapshot(self) -> SnapshotInfo:
         raise FeatureNotSupportedError(
@@ -339,7 +407,9 @@ class DaytonaSession:
     def session_state(self) -> dict:
         sandbox_id = getattr(self._sandbox, "id", None)
         if sandbox_id is None:
-            raise FeatureNotSupportedError("Daytona sandbox object exposes no id; cannot serialize")
+            raise FeatureNotSupportedError(
+                "Daytona sandbox object exposes no id; cannot serialize"
+            )
         state = {"sandbox_id": str(sandbox_id)}
         if self._workdir:
             # Carried across resume so the working directory isn't dropped there

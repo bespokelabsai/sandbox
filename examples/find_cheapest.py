@@ -17,7 +17,11 @@ import time
 from dataclasses import asdict, dataclass
 
 from bespokelabs.sandbox import Sandbox
-from bespokelabs.sandbox.pricing import cost_per_second, get_backend_pricing, list_backends
+from bespokelabs.sandbox.pricing import (
+    cost_per_second,
+    get_backend_pricing,
+    list_backends,
+)
 
 BENCHMARK_CODE = """
 import math, hashlib, json
@@ -76,7 +80,9 @@ def benchmark_backend(backend: str) -> BenchmarkResult:
             sb.destroy()
 
 
-def find_cheapest(backends: list[str], parallel: bool = True) -> list[BenchmarkResult]:
+def find_cheapest(
+    backends: list[str], parallel: bool = True
+) -> list[BenchmarkResult]:
     if parallel:
         with concurrent.futures.ThreadPoolExecutor() as ex:
             results = list(ex.map(benchmark_backend, backends))
@@ -88,7 +94,9 @@ def find_cheapest(backends: list[str], parallel: bool = True) -> list[BenchmarkR
 
 
 def print_table(results: list[BenchmarkResult]) -> None:
-    print(f"\n{'Backend':<12} {'Cold(s)':<10} {'Exec(s)':<10} {'Total(s)':<10} {'Est. Cost $':<14} {'OK'}")
+    print(
+        f"\n{'Backend':<12} {'Cold(s)':<10} {'Exec(s)':<10} {'Total(s)':<10} {'Est. Cost $':<14} {'OK'}"
+    )
     print("-" * 70)
     for r in results:
         status = "yes" if r.success else f"no  {r.error[:30]}"
@@ -100,11 +108,15 @@ def print_table(results: list[BenchmarkResult]) -> None:
     successful = [r for r in results if r.success]
     if successful:
         winner = successful[0]
-        print(f"\n-> Cheapest available: {winner.backend} (${winner.estimated_cost_usd:.8f}/run)")
+        print(
+            f"\n-> Cheapest available: {winner.backend} (${winner.estimated_cost_usd:.8f}/run)"
+        )
 
 
 def print_pricing_table(backends: list[str]) -> None:
-    print(f"\n{'Backend':<12} {'$/vCPU-hr':<12} {'$/GiB-hr':<12} {'Free tier':<30} {'Source'}")
+    print(
+        f"\n{'Backend':<12} {'$/vCPU-hr':<12} {'$/GiB-hr':<12} {'Free tier':<30} {'Source'}"
+    )
     print("-" * 90)
     for b in backends:
         info = get_backend_pricing(b)
@@ -119,15 +131,27 @@ def print_pricing_table(backends: list[str]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark sandbox backends and find the cheapest")
+    parser = argparse.ArgumentParser(
+        description="Benchmark sandbox backends and find the cheapest"
+    )
     parser.add_argument(
         "--backends",
         default="local,docker",
         help=f"Comma-separated backends to benchmark (available: {', '.join(list_backends())})",
     )
-    parser.add_argument("--sequential", action="store_true", help="Run benchmarks sequentially instead of in parallel")
-    parser.add_argument("--pricing-only", action="store_true", help="Just print pricing table, don't benchmark")
-    parser.add_argument("--json", action="store_true", help="Output results as JSON")
+    parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help="Run benchmarks sequentially instead of in parallel",
+    )
+    parser.add_argument(
+        "--pricing-only",
+        action="store_true",
+        help="Just print pricing table, don't benchmark",
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="Output results as JSON"
+    )
     args = parser.parse_args()
 
     backends = [b.strip() for b in args.backends.split(",") if b.strip()]

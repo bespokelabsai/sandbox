@@ -1,3 +1,5 @@
+"""Exception hierarchy and structured error details for sandbox operations."""
+
 from __future__ import annotations
 
 from enum import Enum
@@ -132,7 +134,14 @@ class CommandFailedError(SandboxExecutionError):
         ctx = dict(context) if context else {}
         if exit_code is not None:
             ctx.setdefault("exit_code", exit_code)
-        super().__init__(message, backend=backend, op=op, context=ctx, retryable=retryable, code=code)
+        super().__init__(
+            message,
+            backend=backend,
+            op=op,
+            context=ctx,
+            retryable=retryable,
+            code=code,
+        )
         self.exit_code = exit_code
         self.stdout = stdout
         self.stderr = stderr

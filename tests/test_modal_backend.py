@@ -9,6 +9,7 @@ from bespokelabs.sandbox.types import SandboxConfig
 
 
 class ModalClientGpuTests(unittest.TestCase):
+
     def _client(self) -> tuple[ModalClient, mock.MagicMock]:
         modal = mock.MagicMock()
         modal.App.lookup.return_value = mock.sentinel.app
@@ -55,6 +56,7 @@ class ModalClientGpuTests(unittest.TestCase):
 
 
 class ModalGpuPublicApiTests(unittest.TestCase):
+
     def test_sandbox_threads_gpu_into_config(self) -> None:
         backend = mock.MagicMock()
         backend.create.return_value = mock.MagicMock()

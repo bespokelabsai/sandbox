@@ -116,10 +116,16 @@ class AsyncSandbox:
     # -- Core operations ---------------------------------------------------
 
     @overload
-    async def execute_code(self, code: str, language: str = "python") -> SandboxResult: ...
+    async def execute_code(
+        self, code: str, language: str = "python"
+    ) -> SandboxResult:
+        ...
 
     @overload
-    async def execute_code(self, code: str, language: str = "python", *, return_type: type[T]) -> T: ...
+    async def execute_code(
+        self, code: str, language: str = "python", *, return_type: type[T]
+    ) -> T:
+        ...
 
     async def execute_code(
         self,
@@ -134,12 +140,21 @@ class AsyncSandbox:
         )
 
     @overload
-    async def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult: ...
+    async def execute_command(
+        self, command: str, args: list[str] | None = None
+    ) -> SandboxResult:
+        ...
 
     @overload
     async def execute_command(
-        self, command: str, args: list[str] | None = None, *, return_type: type[T], inject_schema: bool = ...
-    ) -> T: ...
+        self,
+        command: str,
+        args: list[str] | None = None,
+        *,
+        return_type: type[T],
+        inject_schema: bool = ...,
+    ) -> T:
+        ...
 
     async def execute_command(
         self,
@@ -193,19 +208,27 @@ class AsyncSandbox:
 
     async def upload_file(self, local_path: str, remote_path: str) -> None:
         """Async version of :meth:`Sandbox.upload_file`."""
-        await asyncio.to_thread(self._sandbox.upload_file, local_path, remote_path)
+        await asyncio.to_thread(
+            self._sandbox.upload_file, local_path, remote_path
+        )
 
     async def download_file(self, remote_path: str, local_path: str) -> None:
         """Async version of :meth:`Sandbox.download_file`."""
-        await asyncio.to_thread(self._sandbox.download_file, remote_path, local_path)
+        await asyncio.to_thread(
+            self._sandbox.download_file, remote_path, local_path
+        )
 
-    async def upload_dir(self, local_dir: str | Path, remote_dir: str, *, method: str = "auto") -> int:
+    async def upload_dir(
+        self, local_dir: str | Path, remote_dir: str, *, method: str = "auto"
+    ) -> int:
         """Async version of :meth:`Sandbox.upload_dir`."""
         return await asyncio.to_thread(
             self._sandbox.upload_dir, local_dir, remote_dir, method=method
         )
 
-    async def download_dir(self, remote_dir: str, local_dir: str | Path, *, method: str = "auto") -> int:
+    async def download_dir(
+        self, remote_dir: str, local_dir: str | Path, *, method: str = "auto"
+    ) -> int:
         """Async version of :meth:`Sandbox.download_dir`."""
         return await asyncio.to_thread(
             self._sandbox.download_dir, remote_dir, local_dir, method=method

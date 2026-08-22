@@ -27,9 +27,11 @@ from bespokelabs.sandbox import Sandbox
 # Helpers to detect which backends are available
 # ---------------------------------------------------------------------------
 
+
 def _can_use_tensorlake() -> bool:
     try:
         from tensorlake.sandbox import SandboxClient  # noqa: F401
+
         return True
     except Exception:
         return False
@@ -40,6 +42,7 @@ def _can_use_daytona() -> bool:
         return False
     try:
         from daytona import Daytona  # noqa: F401
+
         return True
     except Exception:
         return False
@@ -50,6 +53,7 @@ def _can_use_e2b() -> bool:
         return False
     try:
         from e2b_code_interpreter import Sandbox as E2BSandbox  # noqa: F401
+
         return True
     except Exception:
         return False
@@ -68,6 +72,7 @@ def _can_use_modal() -> bool:
 def _can_use_docker() -> bool:
     try:
         import docker  # noqa: F401
+
         client = docker.from_env()
         client.ping()
         return True
@@ -85,6 +90,7 @@ def _can_use_safehouse() -> bool:
         result = subprocess.run(
             [safehouse, "--", "/usr/bin/true"],
             capture_output=True,
+            check=False,
             text=True,
             timeout=5,
         )
@@ -96,6 +102,7 @@ def _can_use_safehouse() -> bool:
 # ---------------------------------------------------------------------------
 # Shared regression test mixin
 # ---------------------------------------------------------------------------
+
 
 class _RegressionMixin:
     """Common regression tests executed against every backend.
@@ -199,13 +206,16 @@ class _RegressionMixin:
 # Backend-specific test classes
 # ---------------------------------------------------------------------------
 
+
 @unittest.skipUnless(_can_use_tensorlake(), "Tensorlake SDK not available")
 class TensorlakeRegressionTests(_RegressionMixin, unittest.TestCase):
     backend_name = "tensorlake"
     sandbox_kwargs = {"memory_mb": 2048}
 
 
-@unittest.skipUnless(_can_use_daytona(), "Daytona SDK or DAYTONA_API_KEY not available")
+@unittest.skipUnless(
+    _can_use_daytona(), "Daytona SDK or DAYTONA_API_KEY not available"
+)
 class DaytonaRegressionTests(_RegressionMixin, unittest.TestCase):
     backend_name = "daytona"
 
@@ -225,7 +235,10 @@ class DockerRegressionTests(_RegressionMixin, unittest.TestCase):
     backend_name = "docker"
 
 
-@unittest.skipUnless(_can_use_safehouse(), "Safehouse CLI not available or unusable in this environment")
+@unittest.skipUnless(
+    _can_use_safehouse(),
+    "Safehouse CLI not available or unusable in this environment",
+)
 class SafehouseRegressionTests(_RegressionMixin, unittest.TestCase):
     backend_name = "safehouse"
 

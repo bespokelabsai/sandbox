@@ -1,3 +1,5 @@
+"""Modal sandbox backend."""
+
 from __future__ import annotations
 
 import pathlib
@@ -7,7 +9,12 @@ from bespokelabs.sandbox.exceptions import (
     SandboxCreationError,
     SandboxExecutionError,
 )
-from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
+from bespokelabs.sandbox.types import (
+    FileInfo,
+    SandboxConfig,
+    SandboxResult,
+    SnapshotInfo,
+)
 
 
 class ModalClient:
@@ -45,14 +52,18 @@ class ModalClient:
                 create_kwargs["image"] = modal.Image.from_id(config.snapshot_id)
 
             if config.env_vars:
-                create_kwargs["secrets"] = [modal.Secret.from_dict(config.env_vars)]
+                create_kwargs["secrets"] = [
+                    modal.Secret.from_dict(config.env_vars)
+                ]
 
             if config.backend_options:
                 create_kwargs.update(config.backend_options)
 
             sandbox = modal.Sandbox.create(**create_kwargs)
         except Exception as exc:
-            raise SandboxCreationError(f"Failed to create Modal sandbox: {exc}") from exc
+            raise SandboxCreationError(
+                f"Failed to create Modal sandbox: {exc}"
+            ) from exc
 
         return ModalSession(sandbox=sandbox)
 
@@ -72,7 +83,9 @@ class ModalSession:
     def __init__(self, *, sandbox: object) -> None:
         self._sandbox: object = sandbox
 
-    def execute_code(self, code: str, language: str = "python") -> SandboxResult:
+    def execute_code(
+        self, code: str, language: str = "python"
+    ) -> SandboxResult:
         try:
             process = self._sandbox.exec(language, "-c", code)
             stdout = process.stdout.read()
@@ -84,11 +97,17 @@ class ModalSession:
                 exit_code=process.returncode or 0,
             )
         except Exception as exc:
-            raise SandboxExecutionError(f"Modal code execution failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Modal code execution failed: {exc}"
+            ) from exc
 
-    def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult:
+    def execute_command(
+        self, command: str, args: list[str] | None = None
+    ) -> SandboxResult:
         try:
-            cmd_parts = ["bash", "-c", command] if not args else [command] + args
+            cmd_parts = (
+                ["bash", "-c", command] if not args else [command] + args
+            )
             process = self._sandbox.exec(*cmd_parts)
             stdout = process.stdout.read()
             stderr = process.stderr.read()
@@ -99,27 +118,37 @@ class ModalSession:
                 exit_code=process.returncode or 0,
             )
         except Exception as exc:
-            raise SandboxExecutionError(f"Modal command execution failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Modal command execution failed: {exc}"
+            ) from exc
 
     def list_files(self, path: str = "/") -> list[FileInfo]:
         try:
             entries = self._sandbox.ls(path)
             return [
                 FileInfo(
-                    path=f"{path.rstrip('/')}/{e}" if isinstance(e, str) else getattr(e, "path", str(e)),
-                    is_dir=getattr(e, "is_dir", False) if not isinstance(e, str) else False,
+                    path=f"{path.rstrip('/')}/{e}"
+                    if isinstance(e, str)
+                    else getattr(e, "path", str(e)),
+                    is_dir=getattr(e, "is_dir", False)
+                    if not isinstance(e, str)
+                    else False,
                 )
                 for e in entries
             ]
         except Exception as exc:
-            raise SandboxExecutionError(f"Modal list_files failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Modal list_files failed: {exc}"
+            ) from exc
 
     def read_file(self, path: str) -> bytes:
         try:
             with self._sandbox.open(path, "rb") as f:
                 return f.read()
         except Exception as exc:
-            raise SandboxExecutionError(f"Modal read_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Modal read_file failed: {exc}"
+            ) from exc
 
     def write_file(self, path: str, content: bytes | str) -> None:
         try:
@@ -127,7 +156,9 @@ class ModalSession:
             with self._sandbox.open(path, "wb") as f:
                 f.write(data)
         except Exception as exc:
-            raise SandboxExecutionError(f"Modal write_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Modal write_file failed: {exc}"
+            ) from exc
 
     def upload_file(self, local_path: str, remote_path: str) -> None:
         try:
@@ -135,7 +166,9 @@ class ModalSession:
             with self._sandbox.open(remote_path, "wb") as f:
                 f.write(data)
         except Exception as exc:
-            raise SandboxExecutionError(f"Modal upload_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Modal upload_file failed: {exc}"
+            ) from exc
 
     def download_file(self, remote_path: str, local_path: str) -> None:
         try:
@@ -143,7 +176,9 @@ class ModalSession:
                 data = f.read()
             pathlib.Path(local_path).write_bytes(data)
         except Exception as exc:
-            raise SandboxExecutionError(f"Modal download_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Modal download_file failed: {exc}"
+            ) from exc
 
     def snapshot(self) -> SnapshotInfo:
         try:
@@ -153,7 +188,9 @@ class ModalSession:
                 backend="modal",
             )
         except Exception as exc:
-            raise SandboxExecutionError(f"Modal snapshot failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Modal snapshot failed: {exc}"
+            ) from exc
 
     def session_state(self) -> dict:
         return {"sandbox_id": self._sandbox.object_id}

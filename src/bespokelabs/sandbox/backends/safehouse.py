@@ -1,3 +1,5 @@
+"""macOS Safehouse sandbox backend."""
+
 from __future__ import annotations
 
 import os
@@ -19,7 +21,12 @@ from bespokelabs.sandbox.exceptions import (
     SandboxCreationError,
     SandboxExecutionError,
 )
-from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
+from bespokelabs.sandbox.types import (
+    FileInfo,
+    SandboxConfig,
+    SandboxResult,
+    SnapshotInfo,
+)
 
 
 class SafehouseClient:
@@ -59,7 +66,9 @@ class SafehouseClient:
                 env_overlay=config.env_vars or {},
             )
         except Exception as exc:
-            raise SandboxCreationError(f"Failed to create safehouse sandbox: {exc}") from exc
+            raise SandboxCreationError(
+                f"Failed to create safehouse sandbox: {exc}"
+            ) from exc
 
     def resume(self, data: dict) -> SafehouseSession:
         workdir = data.get("workdir")
@@ -122,7 +131,11 @@ class SafehouseSession:
 
     def destroy(self) -> None:
         try:
-            if self._owns_workdir and self._workdir and os.path.exists(self._workdir):
+            if (
+                self._owns_workdir
+                and self._workdir
+                and os.path.exists(self._workdir)
+            ):
                 shutil.rmtree(self._workdir, ignore_errors=True)
         except Exception:
             pass
@@ -130,19 +143,27 @@ class SafehouseSession:
 
     # -- Execution -------------------------------------------------------------
 
-    def execute_code(self, code: str, language: str = "python") -> SandboxResult:
+    def execute_code(
+        self, code: str, language: str = "python"
+    ) -> SandboxResult:
         resolved = self._resolve_interpreter(language)
         if is_python_language(language):
-            code = PYTHON_PREAMBLE + (
-                "exec(compile(%r, \"<sandbox>\", \"exec\"), globals())\n" % code
+            code = (
+                PYTHON_PREAMBLE
+                + f'exec(compile({code!r}, "<sandbox>", "exec"), globals())\n'
             )
         cmd = self._safehouse_cmd() + [resolved, "-c", code]
         return self._run(cmd)
 
-    def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult:
+    def execute_command(
+        self, command: str, args: list[str] | None = None
+    ) -> SandboxResult:
         if args:
-            if (command in ("sh", "bash", "zsh")
-                    and len(args) >= 2 and args[0] == "-c"):
+            if (
+                command in ("sh", "bash", "zsh")
+                and len(args) >= 2
+                and args[0] == "-c"
+            ):
                 shell_cmd = rewrite_redirects(args[1])
                 inner = ["bash", "-c", SHELL_PRELUDE + shell_cmd] + [
                     self._resolve_path(a) if os.path.isabs(a) else a
@@ -166,9 +187,13 @@ class SafehouseSession:
             resolved = self._resolve_path(path)
             p = pathlib.Path(resolved)
             if not p.exists():
-                raise SandboxExecutionError(f"Safehouse list_files failed: path '{path}' does not exist")
+                raise SandboxExecutionError(
+                    f"Safehouse list_files failed: path '{path}' does not exist"
+                )
             if not p.is_dir():
-                raise SandboxExecutionError(f"Safehouse list_files failed: '{path}' is not a directory")
+                raise SandboxExecutionError(
+                    f"Safehouse list_files failed: '{path}' is not a directory"
+                )
             return [
                 FileInfo(
                     path=self._to_sandbox_path(entry),
@@ -180,14 +205,18 @@ class SafehouseSession:
         except SandboxExecutionError:
             raise
         except Exception as exc:
-            raise SandboxExecutionError(f"Safehouse list_files failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Safehouse list_files failed: {exc}"
+            ) from exc
 
     def read_file(self, path: str) -> bytes:
         try:
             resolved = self._resolve_path(path)
             return pathlib.Path(resolved).read_bytes()
         except Exception as exc:
-            raise SandboxExecutionError(f"Safehouse read_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Safehouse read_file failed: {exc}"
+            ) from exc
 
     def write_file(self, path: str, content: bytes | str) -> None:
         try:
@@ -197,9 +226,11 @@ class SafehouseSession:
             if isinstance(content, bytes):
                 p.write_bytes(content)
             else:
-                p.write_text(content)
+                p.write_text(content, encoding="utf-8")
         except Exception as exc:
-            raise SandboxExecutionError(f"Safehouse write_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Safehouse write_file failed: {exc}"
+            ) from exc
 
     def upload_file(self, local_path: str, remote_path: str) -> None:
         try:
@@ -208,14 +239,18 @@ class SafehouseSession:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(local_path, dest)
         except Exception as exc:
-            raise SandboxExecutionError(f"Safehouse upload_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Safehouse upload_file failed: {exc}"
+            ) from exc
 
     def download_file(self, remote_path: str, local_path: str) -> None:
         try:
             resolved = self._resolve_path(remote_path)
             shutil.copy2(resolved, local_path)
         except Exception as exc:
-            raise SandboxExecutionError(f"Safehouse download_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Safehouse download_file failed: {exc}"
+            ) from exc
 
     def snapshot(self) -> SnapshotInfo:
         raise FeatureNotSupportedError(
@@ -226,7 +261,8 @@ class SafehouseSession:
 
     def _safehouse_cmd(self) -> list[str]:
         """Build the safehouse prefix for wrapping a command."""
-        assert self._safehouse_bin and self._workdir
+        if self._workdir is None:
+            raise SandboxExecutionError("Safehouse session has been destroyed")
         return [
             self._safehouse_bin,
             f"--workdir={self._workdir}",
@@ -240,6 +276,7 @@ class SafehouseSession:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
+                check=False,
                 text=True,
                 timeout=self._timeout,
                 cwd=self._workdir,
@@ -257,7 +294,9 @@ class SafehouseSession:
                 exit_code=124,
             )
         except Exception as exc:
-            raise SandboxExecutionError(f"Safehouse execution failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Safehouse execution failed: {exc}"
+            ) from exc
 
     def _resolve_interpreter(self, language: str) -> str:
         if language in ("python", "python3"):

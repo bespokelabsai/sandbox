@@ -1,3 +1,5 @@
+"""Agent specifications, sessions, and sandbox-backed capability helpers."""
+
 from __future__ import annotations
 
 import re
@@ -22,7 +24,13 @@ AgentInputMode = Literal["stdin", "argv", "file", "none"]
 AgentRunner = Callable[["AgentContext", str], Any]
 
 DEFAULT_AGENT_CAPABILITIES: list[AgentCapability] = ["shell", "files"]
-_VALID_CAPABILITIES: set[AgentCapability] = {"shell", "files", "patch", "ports", "artifacts"}
+_VALID_CAPABILITIES: set[AgentCapability] = {
+    "shell",
+    "files",
+    "patch",
+    "ports",
+    "artifacts",
+}
 _VALID_INPUT_MODES = {"stdin", "argv", "file", "none"}
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -58,7 +66,9 @@ class AgentSpec:
             env=env or {},
             input_mode=input_mode,
             input_path=input_path,
-            capabilities=DEFAULT_AGENT_CAPABILITIES if capabilities is None else capabilities,
+            capabilities=DEFAULT_AGENT_CAPABILITIES
+            if capabilities is None
+            else capabilities,
         )
 
     @classmethod
@@ -91,7 +101,9 @@ class InsideAgentSpec(AgentSpec):
     env: dict[str, str] = field(default_factory=dict)
     input_mode: AgentInputMode = "stdin"
     input_path: str = "/tmp/agent-input.txt"
-    capabilities: list[AgentCapability] = field(default_factory=lambda: list(DEFAULT_AGENT_CAPABILITIES))
+    capabilities: list[AgentCapability] = field(
+        default_factory=lambda: list(DEFAULT_AGENT_CAPABILITIES)
+    )
     placement: Literal["inside"] = field(default="inside", init=False)
 
     def __post_init__(self) -> None:
@@ -127,21 +139,33 @@ def _validate_name(name: str) -> None:
         raise ValueError("AgentSpec.name must be non-empty")
 
 
-def _normalize_capabilities(capabilities: list[AgentCapability]) -> list[AgentCapability]:
+def _normalize_capabilities(
+    capabilities: list[AgentCapability],
+) -> list[AgentCapability]:
     normalized = list(capabilities)
     unknown = set(normalized) - _VALID_CAPABILITIES
     if unknown:
-        raise ValueError(f"Unknown agent capabilities: {', '.join(sorted(unknown))}")
+        raise ValueError(
+            f"Unknown agent capabilities: {', '.join(sorted(unknown))}"
+        )
     return normalized
 
 
 class AgentContext:
     """Capability-checked sandbox facade for outside agents."""
 
-    def __init__(self, sandbox: Sandbox, capabilities: list[AgentCapability] | None = None) -> None:
+    def __init__(
+        self,
+        sandbox: Sandbox,
+        capabilities: list[AgentCapability] | None = None,
+    ) -> None:
         self._sandbox = sandbox
         self._capabilities = set(
-            _normalize_capabilities(DEFAULT_AGENT_CAPABILITIES if capabilities is None else capabilities)
+            _normalize_capabilities(
+                DEFAULT_AGENT_CAPABILITIES
+                if capabilities is None
+                else capabilities
+            )
         )
 
     @property
@@ -152,7 +176,9 @@ class AgentContext:
     def capabilities(self) -> set[AgentCapability]:
         return set(self._capabilities)
 
-    def shell(self, command: str, args: list[str] | None = None) -> SandboxResult:
+    def shell(
+        self, command: str, args: list[str] | None = None
+    ) -> SandboxResult:
         self._require("shell")
         return self._sandbox.execute_command(command, args)
 
@@ -168,17 +194,28 @@ class AgentContext:
         self._require("files")
         self._sandbox.write_file(path, content)
 
-    def apply_patch(self, patch: str, *, strip: int = 0, patch_path: str = "/tmp/agent.patch") -> SandboxResult:
+    def apply_patch(
+        self,
+        patch: str,
+        *,
+        strip: int = 0,
+        patch_path: str = "/tmp/agent.patch",
+    ) -> SandboxResult:
         self._require("patch")
         self._sandbox.write_file(patch_path, patch)
         return self._sandbox.execute_command(
             "bash",
-            ["-c", build_patch_apply_command(patch_path=patch_path, strip=strip)],
+            [
+                "-c",
+                build_patch_apply_command(patch_path=patch_path, strip=strip),
+            ],
         )
 
     def _require(self, capability: AgentCapability) -> None:
         if capability not in self._capabilities:
-            raise SandboxError(f"Agent context does not allow '{capability}' capability")
+            raise SandboxError(
+                f"Agent context does not allow '{capability}' capability"
+            )
 
 
 class AgentSession:
@@ -200,11 +237,15 @@ class AgentSession:
     def run(self, prompt: str) -> Any:
         if isinstance(self._spec, OutsideAgentSpec):
             if self._spec.runner is None:
-                raise SandboxError("Outside agent spec requires a runner to call run()")
+                raise SandboxError(
+                    "Outside agent spec requires a runner to call run()"
+                )
             return self._spec.runner(self._context, prompt)
         if isinstance(self._spec, InsideAgentSpec):
             return self._run_inside(prompt, self._spec)
-        raise SandboxError(f"Unknown agent spec type: {type(self._spec).__name__}")
+        raise SandboxError(
+            f"Unknown agent spec type: {type(self._spec).__name__}"
+        )
 
     def _run_inside(self, prompt: str, spec: InsideAgentSpec) -> SandboxResult:
         command = prepare_inside_command(spec.command)
@@ -221,8 +262,12 @@ class AgentSession:
             elif mode == "file":
                 command = [*command, input_path]
             elif mode != "none":
-                raise SandboxError(f"Unsupported inside agent input_mode: {mode}")
-            return self._sandbox.execute_command(command[0], command[1:] or None)
+                raise SandboxError(
+                    f"Unsupported inside agent input_mode: {mode}"
+                )
+            return self._sandbox.execute_command(
+                command[0], command[1:] or None
+            )
 
         script = build_inside_shell_script(
             command=spec.command,
