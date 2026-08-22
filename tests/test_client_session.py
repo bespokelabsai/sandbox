@@ -66,6 +66,7 @@ class _RecordingBackendClient:
 
 
 class BackendClientReuseTests(unittest.TestCase):
+
     def setUp(self) -> None:
         _RecordingBackendClient.instances = []
         patcher = mock.patch.dict(
@@ -84,7 +85,9 @@ class BackendClientReuseTests(unittest.TestCase):
         self.assertEqual(len(_RecordingBackendClient.instances), 1)
         self.assertEqual(_RecordingBackendClient.instances[0].create_calls, 2)
 
-    def test_direct_sandbox_constructor_builds_its_own_backend_client(self) -> None:
+    def test_direct_sandbox_constructor_builds_its_own_backend_client(
+        self,
+    ) -> None:
         Sandbox("fake")
         Sandbox("fake")
 

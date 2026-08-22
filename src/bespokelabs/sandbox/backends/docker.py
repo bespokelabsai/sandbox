@@ -1,3 +1,5 @@
+"""Docker sandbox backend."""
+
 from __future__ import annotations
 
 import io
@@ -11,7 +13,12 @@ from bespokelabs.sandbox.exceptions import (
     SandboxCreationError,
     SandboxExecutionError,
 )
-from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
+from bespokelabs.sandbox.types import (
+    FileInfo,
+    SandboxConfig,
+    SandboxResult,
+    SnapshotInfo,
+)
 
 _DEFAULT_IMAGE = "python:3.12-slim"
 
@@ -58,7 +65,9 @@ class DockerClient:
             raise SandboxCreationError(
                 f"Cannot resume Docker sandbox '{data.get('container_id')}': {exc}"
             ) from exc
-        return DockerSession(container=container, timeout=int(data.get("timeout", 600)))
+        return DockerSession(
+            container=container, timeout=int(data.get("timeout", 600))
+        )
 
     def create(self, config: SandboxConfig) -> DockerSession:
         self._connect()
@@ -71,7 +80,9 @@ class DockerClient:
             try:
                 self._client.images.pull(image)
             except Exception as exc:
-                raise SandboxCreationError(f"Failed to pull Docker image '{image}': {exc}") from exc
+                raise SandboxCreationError(
+                    f"Failed to pull Docker image '{image}': {exc}"
+                ) from exc
 
         create_kwargs: dict = {
             "image": image,
@@ -95,7 +106,9 @@ class DockerClient:
         try:
             container = self._client.containers.run(**create_kwargs)
         except Exception as exc:
-            raise SandboxCreationError(f"Failed to create Docker container: {exc}") from exc
+            raise SandboxCreationError(
+                f"Failed to create Docker container: {exc}"
+            ) from exc
 
         return DockerSession(container=container, timeout=config.timeout_secs)
 
@@ -107,15 +120,21 @@ class DockerSession:
         self._container: object = container
         self._timeout = timeout
 
-    def execute_code(self, code: str, language: str = "python") -> SandboxResult:
+    def execute_code(
+        self, code: str, language: str = "python"
+    ) -> SandboxResult:
         try:
             return self._exec_with_timeout([language, "-c", code])
         except SandboxExecutionError:
             raise
         except Exception as exc:
-            raise SandboxExecutionError(f"Docker code execution failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Docker code execution failed: {exc}"
+            ) from exc
 
-    def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult:
+    def execute_command(
+        self, command: str, args: list[str] | None = None
+    ) -> SandboxResult:
         try:
             if args:
                 cmd = [command] + args
@@ -125,7 +144,9 @@ class DockerSession:
         except SandboxExecutionError:
             raise
         except Exception as exc:
-            raise SandboxExecutionError(f"Docker command execution failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Docker command execution failed: {exc}"
+            ) from exc
 
     def list_files(self, path: str = "/") -> list[FileInfo]:
         try:
@@ -147,19 +168,21 @@ class DockerSession:
             )
         stdout = (stdout_bytes or b"").decode(errors="replace")
         files: list[FileInfo] = []
-        for line in stdout.strip().splitlines():
-            line = line.strip()
+        for raw_line in stdout.strip().splitlines():
+            line = raw_line.strip()
             if not line:
                 continue
             parts = line.split(" ", 2)
             if len(parts) < 3 or not parts[2]:
                 continue
             file_type, size_str, name = parts
-            files.append(FileInfo(
-                path=f"{path.rstrip('/')}/{name}",
-                is_dir=(file_type == "d"),
-                size=int(size_str) if size_str.isdigit() else None,
-            ))
+            files.append(
+                FileInfo(
+                    path=f"{path.rstrip('/')}/{name}",
+                    is_dir=(file_type == "d"),
+                    size=int(size_str) if size_str.isdigit() else None,
+                )
+            )
         return files
 
     def _list_files_ls(self, path: str) -> list[FileInfo]:
@@ -175,13 +198,15 @@ class DockerSession:
             )
         stdout = (stdout_bytes or b"").decode(errors="replace")
         files: list[FileInfo] = []
-        for line in stdout.strip().splitlines():
-            line = line.strip()
+        for raw_line in stdout.strip().splitlines():
+            line = raw_line.strip()
             if not line:
                 continue
             is_dir = line.endswith("/")
             name = line.rstrip("*/=>@|")
-            files.append(FileInfo(path=f"{path.rstrip('/')}/{name}", is_dir=is_dir))
+            files.append(
+                FileInfo(path=f"{path.rstrip('/')}/{name}", is_dir=is_dir)
+            )
         return files
 
     def read_file(self, path: str) -> bytes:
@@ -192,26 +217,34 @@ class DockerSession:
                 member = tar.getmembers()[0]
                 f = tar.extractfile(member)
                 if f is None:
-                    raise SandboxExecutionError(f"Docker read_file: '{path}' is not a regular file")
+                    raise SandboxExecutionError(
+                        f"Docker read_file: '{path}' is not a regular file"
+                    )
                 return f.read()
         except SandboxExecutionError:
             raise
         except Exception as exc:
-            raise SandboxExecutionError(f"Docker read_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Docker read_file failed: {exc}"
+            ) from exc
 
     def write_file(self, path: str, content: bytes | str) -> None:
         try:
             data = content if isinstance(content, bytes) else content.encode()
             self._put_file(path, data)
         except Exception as exc:
-            raise SandboxExecutionError(f"Docker write_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Docker write_file failed: {exc}"
+            ) from exc
 
     def upload_file(self, local_path: str, remote_path: str) -> None:
         try:
             data = pathlib.Path(local_path).read_bytes()
             self._put_file(remote_path, data)
         except Exception as exc:
-            raise SandboxExecutionError(f"Docker upload_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Docker upload_file failed: {exc}"
+            ) from exc
 
     def download_file(self, remote_path: str, local_path: str) -> None:
         try:
@@ -220,7 +253,9 @@ class DockerSession:
         except SandboxExecutionError:
             raise
         except Exception as exc:
-            raise SandboxExecutionError(f"Docker download_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Docker download_file failed: {exc}"
+            ) from exc
 
     def snapshot(self) -> SnapshotInfo:
         try:
@@ -230,7 +265,9 @@ class DockerSession:
                 backend="docker",
             )
         except Exception as exc:
-            raise SandboxExecutionError(f"Docker snapshot failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Docker snapshot failed: {exc}"
+            ) from exc
 
     def session_state(self) -> dict:
         return {"container_id": self._container.id, "timeout": self._timeout}

@@ -38,7 +38,9 @@ Be direct and technical.  Skip praise.
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Claude Code with a custom persona")
+    parser = argparse.ArgumentParser(
+        description="Claude Code with a custom persona"
+    )
     parser.add_argument(
         "--persona",
         type=str,
@@ -111,7 +113,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(output)
 """,
             )
-            prompt = args.prompt or "Audit /app.py for security vulnerabilities."
+            prompt = (
+                args.prompt or "Audit /app.py for security vulnerabilities."
+            )
         else:
             prompt = args.prompt or "Summarize your earlier findings."
 
@@ -119,9 +123,12 @@ class Handler(BaseHTTPRequestHandler):
         # --append-system-prompt preserves Claude Code's built-in capabilities
         # while layering the persona on top.
         claude_args = [
-            "-p", prompt,
-            "--output-format", "text",
-            "--append-system-prompt", args.persona,
+            "-p",
+            prompt,
+            "--output-format",
+            "text",
+            "--append-system-prompt",
+            args.persona,
         ]
         if args.resume:
             claude_args.append("-c")

@@ -1,5 +1,4 @@
-"""
-Move local files — Claude Code skills, datasets, configs — into a sandbox.
+"""Move local files — Claude Code skills, datasets, configs — into a sandbox.
 
 Single files are easy: `sb.upload_file(local, remote)`, or seed them at
 creation with `Sandbox(files={remote: bytes})`. Moving a whole *folder* (a
@@ -81,7 +80,9 @@ def make_demo_skill(root: Path) -> Path:
 
 def verify(sb: Sandbox, dest: str) -> None:
     """Prove the tree landed: list files, read one back, check the exec bit."""
-    listing = sb.execute_command("bash", args=["-c", f"find '{dest}' -type f | sort"])
+    listing = sb.execute_command(
+        "bash", args=["-c", f"find '{dest}' -type f | sort"]
+    )
     for line in listing.stdout.splitlines():
         print("   ", line)
     try:
@@ -103,7 +104,9 @@ def verify(sb: Sandbox, dest: str) -> None:
         print("    scripts/greet.sh executable:", xbit.stdout.strip())
 
 
-def run_method(method: str, backend: str, preset: str | None, src_dir: Path, dest: str) -> None:
+def run_method(
+    method: str, backend: str, preset: str | None, src_dir: Path, dest: str
+) -> None:
     print(f"== method: {method} ==")
     opts = {"preset": preset} if preset else {}
     if method == "files":
@@ -132,7 +135,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Move a directory (e.g. a Claude Code skill) into a sandbox"
     )
-    parser.add_argument("--backend", default="local", help="Sandbox backend (default: local)")
+    parser.add_argument(
+        "--backend", default="local", help="Sandbox backend (default: local)"
+    )
     parser.add_argument(
         "--preset",
         default=None,
@@ -163,11 +168,15 @@ def main() -> None:
         src_dir = make_demo_skill(Path(tmp.name))
 
     dest = f"{args.dest_root.rstrip('/')}/{src_dir.name}"
-    methods = ["files", "upload", "tar"] if args.method == "all" else [args.method]
+    methods = (
+        ["files", "upload", "tar"] if args.method == "all" else [args.method]
+    )
 
     print(f"Source:          {src_dir}")
     print(f"Sandbox dest:    {dest}")
-    print(f"Backend:         {args.backend}{' + preset ' + args.preset if args.preset else ''}\n")
+    print(
+        f"Backend:         {args.backend}{' + preset ' + args.preset if args.preset else ''}\n"
+    )
 
     try:
         for method in methods:
@@ -176,7 +185,9 @@ def main() -> None:
         if tmp:
             tmp.cleanup()
 
-    print("Done. The same helpers move any directory — datasets, configs, not just skills.")
+    print(
+        "Done. The same helpers move any directory — datasets, configs, not just skills."
+    )
 
 
 if __name__ == "__main__":

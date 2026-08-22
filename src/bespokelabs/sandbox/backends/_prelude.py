@@ -103,9 +103,9 @@ del _sb_setup
 # (``<<``, ``<<<``).
 
 _REDIRECT_RE = re.compile(
-    r"""("(?:[^"\\]|\\.)*"|'[^']*')"""    # group 1: quoted string (skip)
-    r"""|(>[>]?\s*|(?<!<)<\s*)"""          # group 2: redirect operator
-    r"""(/[^\s])""",                       # group 3: start of absolute path
+    r"""("(?:[^"\\]|\\.)*"|'[^']*')"""  # group 1: quoted string (skip)
+    r"""|(>[>]?\s*|(?<!<)<\s*)"""  # group 2: redirect operator
+    r"""(/[^\s])""",  # group 3: start of absolute path
     re.DOTALL,
 )
 
@@ -121,6 +121,7 @@ def rewrite_redirects(command: str) -> str:
     Quoted strings are left intact to avoid false positives such as
     ``echo ">/tmp/not-a-redirect"``.
     """
+
     def _repl(m: re.Match) -> str:
         if m.group(1):  # quoted string — pass through unchanged
             return m.group(0)

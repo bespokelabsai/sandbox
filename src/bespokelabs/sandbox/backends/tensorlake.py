@@ -1,3 +1,5 @@
+"""Tensorlake sandbox backend."""
+
 from __future__ import annotations
 
 import base64
@@ -11,7 +13,12 @@ from bespokelabs.sandbox.exceptions import (
     SandboxCreationError,
     SandboxExecutionError,
 )
-from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
+from bespokelabs.sandbox.types import (
+    FileInfo,
+    SandboxConfig,
+    SandboxResult,
+    SnapshotInfo,
+)
 
 
 class TensorlakeClient:
@@ -23,7 +30,9 @@ class TensorlakeClient:
 
     def __init__(self) -> None:
         try:
-            from tensorlake.sandbox import SandboxClient as TensorlakeSandboxClient  # type: ignore[import-untyped]
+            from tensorlake.sandbox import (
+                SandboxClient as TensorlakeSandboxClient,  # type: ignore[import-untyped]
+            )
         except ImportError as exc:
             raise BackendNotInstalledError(
                 "Tensorlake SDK not installed. Run: pip install bespokelabs-sandbox[tensorlake]"
@@ -58,7 +67,9 @@ class TensorlakeClient:
                 kwargs.update(config.backend_options)
             sandbox = client.create_and_connect(**kwargs)
         except Exception as exc:
-            raise SandboxCreationError(f"Failed to create Tensorlake sandbox: {exc}") from exc
+            raise SandboxCreationError(
+                f"Failed to create Tensorlake sandbox: {exc}"
+            ) from exc
 
         return TensorlakeSession(
             client=client,
@@ -89,12 +100,16 @@ class TensorlakeClient:
 class TensorlakeSession:
     """One live Tensorlake sandbox."""
 
-    def __init__(self, *, client: object, sandbox: object, workdir: str = "/tmp") -> None:
+    def __init__(
+        self, *, client: object, sandbox: object, workdir: str = "/tmp"
+    ) -> None:
         self._client = client
         self._sandbox: object = sandbox
         self._workdir = workdir
 
-    def execute_code(self, code: str, language: str = "python") -> SandboxResult:
+    def execute_code(
+        self, code: str, language: str = "python"
+    ) -> SandboxResult:
         try:
             result = self._sandbox.run(language, ["-c", code])
             return SandboxResult(
@@ -103,11 +118,19 @@ class TensorlakeSession:
                 exit_code=getattr(result, "exit_code", 0) or 0,
             )
         except Exception as exc:
-            raise SandboxExecutionError(f"Tensorlake code execution failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Tensorlake code execution failed: {exc}"
+            ) from exc
 
-    def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult:
+    def execute_command(
+        self, command: str, args: list[str] | None = None
+    ) -> SandboxResult:
         try:
-            command_line = command if not args else f"{command} {' '.join(shlex.quote(a) for a in args)}"
+            command_line = (
+                command
+                if not args
+                else f"{command} {' '.join(shlex.quote(a) for a in args)}"
+            )
             script = (
                 'export PATH="$HOME/.npm-global/bin:$PATH"; '
                 f"mkdir -p {shlex.quote(self._workdir)} && "
@@ -122,23 +145,31 @@ class TensorlakeSession:
                 exit_code=getattr(result, "exit_code", 0) or 0,
             )
         except Exception as exc:
-            raise SandboxExecutionError(f"Tensorlake command execution failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Tensorlake command execution failed: {exc}"
+            ) from exc
 
     def list_files(self, path: str = "/") -> list[FileInfo]:
         """List files by running ls inside the sandbox (no native file API)."""
         try:
-            result = self._sandbox.run("bash", ["-c", f"ls -1F {shlex.quote(path)}"])
+            result = self._sandbox.run(
+                "bash", ["-c", f"ls -1F {shlex.quote(path)}"]
+            )
             files: list[FileInfo] = []
-            for line in (result.stdout or "").strip().splitlines():
-                line = line.strip()
+            for raw_line in (result.stdout or "").strip().splitlines():
+                line = raw_line.strip()
                 if not line:
                     continue
                 is_dir = line.endswith("/")
                 name = line.rstrip("*/=>@|")
-                files.append(FileInfo(path=f"{path.rstrip('/')}/{name}", is_dir=is_dir))
+                files.append(
+                    FileInfo(path=f"{path.rstrip('/')}/{name}", is_dir=is_dir)
+                )
             return files
         except Exception as exc:
-            raise SandboxExecutionError(f"Tensorlake list_files failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Tensorlake list_files failed: {exc}"
+            ) from exc
 
     def read_file(self, path: str) -> bytes:
         """Read file by running cat inside the sandbox."""
@@ -146,30 +177,50 @@ class TensorlakeSession:
             result = self._sandbox.run("cat", [path])
             return (result.stdout or "").encode()
         except Exception as exc:
-            raise SandboxExecutionError(f"Tensorlake read_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Tensorlake read_file failed: {exc}"
+            ) from exc
 
     def write_file(self, path: str, content: bytes | str) -> None:
         """Write file via base64 pipe inside the sandbox."""
         try:
             data = content if isinstance(content, bytes) else content.encode()
             encoded = base64.b64encode(data).decode()
-            self._sandbox.run("bash", ["-c", f"echo {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)}"])
+            self._sandbox.run(
+                "bash",
+                [
+                    "-c",
+                    f"echo {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)}",
+                ],
+            )
         except Exception as exc:
-            raise SandboxExecutionError(f"Tensorlake write_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Tensorlake write_file failed: {exc}"
+            ) from exc
 
     def upload_file(self, local_path: str, remote_path: str) -> None:
         """Upload a local file by base64-encoding and writing via shell."""
         try:
             data = pathlib.Path(local_path).read_bytes()
             encoded = base64.b64encode(data).decode()
-            self._sandbox.run("bash", ["-c", f"echo {shlex.quote(encoded)} | base64 -d > {shlex.quote(remote_path)}"])
+            self._sandbox.run(
+                "bash",
+                [
+                    "-c",
+                    f"echo {shlex.quote(encoded)} | base64 -d > {shlex.quote(remote_path)}",
+                ],
+            )
         except Exception as exc:
-            raise SandboxExecutionError(f"Tensorlake upload_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Tensorlake upload_file failed: {exc}"
+            ) from exc
 
     def download_file(self, remote_path: str, local_path: str) -> None:
         """Download a file by base64-encoding its contents from the sandbox."""
         try:
-            result = self._sandbox.run("bash", ["-c", f"base64 {shlex.quote(remote_path)}"])
+            result = self._sandbox.run(
+                "bash", ["-c", f"base64 {shlex.quote(remote_path)}"]
+            )
             exit_code = getattr(result, "exit_code", 0) or 0
             if exit_code != 0:
                 stderr = getattr(result, "stderr", "") or ""
@@ -181,7 +232,9 @@ class TensorlakeSession:
         except SandboxExecutionError:
             raise
         except Exception as exc:
-            raise SandboxExecutionError(f"Tensorlake download_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Tensorlake download_file failed: {exc}"
+            ) from exc
 
     def snapshot(self) -> SnapshotInfo:
         try:
@@ -191,7 +244,9 @@ class TensorlakeSession:
                 backend="tensorlake",
             )
         except Exception as exc:
-            raise SandboxExecutionError(f"Tensorlake snapshot failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Tensorlake snapshot failed: {exc}"
+            ) from exc
 
     def session_state(self) -> dict:
         return {

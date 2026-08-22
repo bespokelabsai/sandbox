@@ -39,8 +39,8 @@ def parse_claude_result(stdout: str) -> dict | None:
 
     # stream-json: scan NDJSON lines and keep the last result record.
     result: dict | None = None
-    for line in text.splitlines():
-        line = line.strip()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         try:
@@ -60,7 +60,9 @@ def usage_from_result(record: dict | None) -> Usage | None:
     """
     if record is None:
         return None
-    usage = record.get("usage") if isinstance(record.get("usage"), dict) else None
+    usage = (
+        record.get("usage") if isinstance(record.get("usage"), dict) else None
+    )
     if usage is None and "total_cost_usd" not in record:
         return None
     usage = usage or {}
@@ -86,12 +88,24 @@ def result_text(record: dict | None) -> str | None:
 
 
 def _looks_like_result(record: dict) -> bool:
-    return record.get("type") == "result" or "total_cost_usd" in record or "usage" in record
+    return (
+        record.get("type") == "result"
+        or "total_cost_usd" in record
+        or "usage" in record
+    )
 
 
 def _int(value: object) -> int:
-    return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
+    return (
+        int(value)
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+        else 0
+    )
 
 
 def _float(value: object) -> float:
-    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
+    return (
+        float(value)
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+        else 0.0
+    )

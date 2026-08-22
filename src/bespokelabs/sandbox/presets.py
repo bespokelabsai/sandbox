@@ -1,3 +1,5 @@
+"""Built-in sandbox presets and the preset registration API."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -25,6 +27,7 @@ class SandboxPreset:
         timeout_secs: Recommended timeout.
         env_vars: Environment variables to set.
         allow_internet: Whether internet access is needed (e.g. for installs).
+
     """
 
     name: str
@@ -57,7 +60,9 @@ def get_preset(name: str) -> SandboxPreset:
     """Look up a preset by name. Raises KeyError if not found."""
     if name not in PRESETS:
         available = ", ".join(sorted(PRESETS)) or "(none)"
-        raise KeyError(f"Unknown preset '{name}'. Available presets: {available}")
+        raise KeyError(
+            f"Unknown preset '{name}'. Available presets: {available}"
+        )
     return PRESETS[name]
 
 
@@ -84,50 +89,58 @@ def _tensorlake_npm_install(packages: str) -> str:
 
 # -- Agent presets ---------------------------------------------------------
 
-register_preset(SandboxPreset(
-    name="claude-code",
-    description="Sandbox with Claude Code (Anthropic CLI) installed",
-    image=f"{IMAGE_REGISTRY}/claude-code:{PRESET_IMAGE_TAG}",
-    setup_commands=[
-        "npm install -g @anthropic-ai/claude-code",
-    ],
-    backend_setup_commands={
-        "tensorlake": [
-            _tensorlake_npm_install("@anthropic-ai/claude-code"),
+register_preset(
+    SandboxPreset(
+        name="claude-code",
+        description="Sandbox with Claude Code (Anthropic CLI) installed",
+        image=f"{IMAGE_REGISTRY}/claude-code:{PRESET_IMAGE_TAG}",
+        setup_commands=[
+            "npm install -g @anthropic-ai/claude-code",
         ],
-    },
-    memory_mb=2048,
-    timeout_secs=1800,
-))
+        backend_setup_commands={
+            "tensorlake": [
+                _tensorlake_npm_install("@anthropic-ai/claude-code"),
+            ],
+        },
+        memory_mb=2048,
+        timeout_secs=1800,
+    )
+)
 
-register_preset(SandboxPreset(
-    name="codex",
-    description="Sandbox with Codex CLI installed",
-    image=f"{IMAGE_REGISTRY}/codex:{PRESET_IMAGE_TAG}",
-    setup_commands=[
-        "npm install -g @openai/codex",
-    ],
-    backend_setup_commands={
-        "tensorlake": [
-            _tensorlake_npm_install("@openai/codex"),
+register_preset(
+    SandboxPreset(
+        name="codex",
+        description="Sandbox with Codex CLI installed",
+        image=f"{IMAGE_REGISTRY}/codex:{PRESET_IMAGE_TAG}",
+        setup_commands=[
+            "npm install -g @openai/codex",
         ],
-    },
-    memory_mb=2048,
-    timeout_secs=1800,
-))
+        backend_setup_commands={
+            "tensorlake": [
+                _tensorlake_npm_install("@openai/codex"),
+            ],
+        },
+        memory_mb=2048,
+        timeout_secs=1800,
+    )
+)
 
-register_preset(SandboxPreset(
-    name="claude-code-codex",
-    description="Sandbox with Claude Code and Codex CLI installed",
-    image=f"{IMAGE_REGISTRY}/claude-code-codex:{PRESET_IMAGE_TAG}",
-    setup_commands=[
-        "npm install -g @anthropic-ai/claude-code @openai/codex",
-    ],
-    backend_setup_commands={
-        "tensorlake": [
-            _tensorlake_npm_install("@anthropic-ai/claude-code @openai/codex"),
+register_preset(
+    SandboxPreset(
+        name="claude-code-codex",
+        description="Sandbox with Claude Code and Codex CLI installed",
+        image=f"{IMAGE_REGISTRY}/claude-code-codex:{PRESET_IMAGE_TAG}",
+        setup_commands=[
+            "npm install -g @anthropic-ai/claude-code @openai/codex",
         ],
-    },
-    memory_mb=2048,
-    timeout_secs=1800,
-))
+        backend_setup_commands={
+            "tensorlake": [
+                _tensorlake_npm_install(
+                    "@anthropic-ai/claude-code @openai/codex"
+                ),
+            ],
+        },
+        memory_mb=2048,
+        timeout_secs=1800,
+    )
+)

@@ -24,6 +24,7 @@ from bespokelabs.sandbox import (
 
 
 class BackwardCompatTests(unittest.TestCase):
+
     def test_plain_message_unchanged(self) -> None:
         err = SandboxError("boom")
         self.assertEqual(str(err), "boom")
@@ -42,9 +43,13 @@ class BackwardCompatTests(unittest.TestCase):
 
 
 class StructuredContextTests(unittest.TestCase):
+
     def test_enriched_str_includes_fields(self) -> None:
         err = SandboxCreationError(
-            "create failed", backend="daytona", op="create", context={"exit_code": 1}
+            "create failed",
+            backend="daytona",
+            op="create",
+            context={"exit_code": 1},
         )
         s = str(err)
         self.assertIn("create failed", s)
@@ -55,7 +60,9 @@ class StructuredContextTests(unittest.TestCase):
 
     def test_retryable_shown_only_when_true(self) -> None:
         self.assertIn("retryable", str(SandboxTimeoutError("t", op="exec")))
-        self.assertNotIn("retryable", str(SandboxCreationError("c", op="create")))
+        self.assertNotIn(
+            "retryable", str(SandboxCreationError("c", op="create"))
+        )
 
     def test_cause_is_preserved(self) -> None:
         root = ValueError("root")
@@ -68,12 +75,15 @@ class StructuredContextTests(unittest.TestCase):
             self.assertIs(e.__cause__, root)
 
     def test_per_instance_overrides(self) -> None:
-        err = SandboxCreationError("x", retryable=True, code=ErrorCode.CONNECTION)
+        err = SandboxCreationError(
+            "x", retryable=True, code=ErrorCode.CONNECTION
+        )
         self.assertTrue(err.retryable)
         self.assertEqual(err.code, ErrorCode.CONNECTION)
 
 
 class SubclassDefaultsTests(unittest.TestCase):
+
     def test_codes_and_retryability(self) -> None:
         cases = [
             (BackendNotInstalledError, ErrorCode.BACKEND_NOT_INSTALLED, False),
@@ -94,7 +104,9 @@ class SubclassDefaultsTests(unittest.TestCase):
             self.assertIsInstance(err, SandboxError, cls.__name__)
 
     def test_command_failed_is_execution_error_and_carries_fields(self) -> None:
-        err = CommandFailedError("boom", exit_code=42, stdout="out", stderr="err")
+        err = CommandFailedError(
+            "boom", exit_code=42, stdout="out", stderr="err"
+        )
         self.assertIsInstance(err, SandboxExecutionError)
         self.assertEqual(err.exit_code, 42)
         self.assertEqual(err.stdout, "out")
@@ -103,6 +115,7 @@ class SubclassDefaultsTests(unittest.TestCase):
 
 
 class IntegrationTests(unittest.TestCase):
+
     def test_unknown_backend_is_configuration_error(self) -> None:
         with self.assertRaises(SandboxConfigurationError) as ctx:
             Sandbox("not-a-backend")
@@ -116,7 +129,9 @@ class IntegrationTests(unittest.TestCase):
 
         with Sandbox("local") as sb:
             with self.assertRaises(CommandFailedError) as ctx:
-                sb.execute_command("sh", ["-c", "echo bad >&2; exit 3"], return_type=M)
+                sb.execute_command(
+                    "sh", ["-c", "echo bad >&2; exit 3"], return_type=M
+                )
         err = ctx.exception
         self.assertEqual(err.exit_code, 3)
         self.assertEqual(err.code, ErrorCode.COMMAND_FAILED)

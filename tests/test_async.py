@@ -9,7 +9,12 @@ from unittest import mock
 
 from pydantic import BaseModel
 
-from bespokelabs.sandbox import AsyncSandbox, AsyncSandboxClient, Sandbox, SandboxError
+from bespokelabs.sandbox import (
+    AsyncSandbox,
+    AsyncSandboxClient,
+    Sandbox,
+    SandboxError,
+)
 from bespokelabs.sandbox.exceptions import BackendNotInstalledError
 from bespokelabs.sandbox.types import SandboxResult
 
@@ -103,10 +108,12 @@ class AsyncSandboxClientLocalTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AsyncBackendClientReuseTests(unittest.IsolatedAsyncioTestCase):
+
     async def test_gpu_is_forwarded_to_config(self) -> None:
         configs: list[object] = []
 
         class RecordingBackendClient:
+
             def create(self, config: object) -> mock.MagicMock:
                 configs.append(config)
                 return mock.MagicMock()
@@ -120,10 +127,13 @@ class AsyncBackendClientReuseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(configs[0].gpu, "H100")
 
-    async def test_backend_client_constructed_once_across_concurrent_creates(self) -> None:
+    async def test_backend_client_constructed_once_across_concurrent_creates(
+        self,
+    ) -> None:
         instances: list[object] = []
 
         class RecordingBackendClient:
+
             def __init__(self) -> None:
                 instances.append(self)
 
@@ -138,12 +148,15 @@ class AsyncBackendClientReuseTests(unittest.IsolatedAsyncioTestCase):
             clear=False,
         ):
             client = AsyncSandboxClient("fake")
-            await asyncio.gather(client.create(), client.create(), client.create())
+            await asyncio.gather(
+                client.create(), client.create(), client.create()
+            )
 
         self.assertEqual(len(instances), 1)
 
     async def test_missing_sdk_surfaces_at_create(self) -> None:
         class MissingBackendClient:
+
             def __init__(self) -> None:
                 raise BackendNotInstalledError("SDK not installed")
 

@@ -20,8 +20,11 @@ from bespokelabs.sandbox.types import SandboxResult
 
 
 class SessionStateSerializationTests(unittest.TestCase):
+
     def test_roundtrip_json(self) -> None:
-        state = SandboxSessionState(backend="docker", data={"container_id": "abc", "timeout": 600})
+        state = SandboxSessionState(
+            backend="docker", data={"container_id": "abc", "timeout": 600}
+        )
         restored = SandboxSessionState.from_json(state.to_json())
         self.assertEqual(restored.backend, "docker")
         self.assertEqual(restored.data["container_id"], "abc")
@@ -39,7 +42,9 @@ class LocalResumeTests(unittest.TestCase):
             self.assertEqual(state.backend, "local")
 
             # Reattach from raw JSON, as another process would.
-            resumed = Sandbox.resume(SandboxSessionState.from_json(state.to_json()))
+            resumed = Sandbox.resume(
+                SandboxSessionState.from_json(state.to_json())
+            )
             self.addCleanup(resumed.destroy)
 
             self.assertEqual(resumed.read_file("/marker.txt"), b"persisted")
@@ -59,7 +64,9 @@ class LocalResumeTests(unittest.TestCase):
             self.assertEqual(result.stdout.strip(), "bar")
 
     def test_resume_missing_workdir_raises(self) -> None:
-        state = SandboxSessionState(backend="local", data={"workdir": "/nonexistent/xyz"})
+        state = SandboxSessionState(
+            backend="local", data={"workdir": "/nonexistent/xyz"}
+        )
         with self.assertRaises(SandboxError):
             Sandbox.resume(state)
 
@@ -72,13 +79,17 @@ class LocalResumeTests(unittest.TestCase):
 
 
 class BackendMismatchTests(unittest.TestCase):
+
     def test_resume_wrong_backend_raises(self) -> None:
-        state = SandboxSessionState(backend="docker", data={"container_id": "x"})
+        state = SandboxSessionState(
+            backend="docker", data={"container_id": "x"}
+        )
         with self.assertRaises(SandboxError):
             SandboxClient("local").resume(state)
 
 
 class RayUnsupportedTests(unittest.TestCase):
+
     def test_session_state_not_supported(self) -> None:
         from bespokelabs.sandbox.backends.ray import RaySession
 
@@ -93,7 +104,10 @@ class DeclarativeWorkspaceTests(unittest.TestCase):
     def test_files_written_on_create(self) -> None:
         sb = Sandbox(
             "local",
-            files={"/app/config.json": '{"k": 1}', "/app/data.bin": b"\x00\x01"},
+            files={
+                "/app/config.json": '{"k": 1}',
+                "/app/data.bin": b"\x00\x01",
+            },
         )
         self.addCleanup(sb.destroy)
 
@@ -107,28 +121,43 @@ class DeclarativeWorkspaceTests(unittest.TestCase):
             subprocess.run(["git", "init", "-q", origin], check=True)
             with open(os.path.join(origin, "hello.txt"), "w") as f:
                 f.write("from-repo")
-            env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-                   "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+            env = {
+                **os.environ,
+                "GIT_AUTHOR_NAME": "t",
+                "GIT_AUTHOR_EMAIL": "t@t",
+                "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@t",
+            }
             subprocess.run(["git", "-C", origin, "add", "."], check=True)
-            subprocess.run(["git", "-C", origin, "commit", "-qm", "init"], check=True, env=env)
+            subprocess.run(
+                ["git", "-C", origin, "commit", "-qm", "init"],
+                check=True,
+                env=env,
+            )
 
             sb = Sandbox("local", git_repo=f"file://{origin}")
             self.addCleanup(sb.destroy)
 
             repo_name = os.path.basename(origin)
-            self.assertEqual(sb.read_file(f"/{repo_name}/hello.txt"), b"from-repo")
+            self.assertEqual(
+                sb.read_file(f"/{repo_name}/hello.txt"), b"from-repo"
+            )
 
     def test_git_clone_failure_destroys_sandbox(self) -> None:
         # A recording session whose git clone "fails"; create must surface
         # the error and destroy the partially-built sandbox.
         session = mock.MagicMock()
-        session.execute_command.return_value = SandboxResult(exit_code=128, stderr="boom")
+        session.execute_command.return_value = SandboxResult(
+            exit_code=128, stderr="boom"
+        )
 
         client = mock.MagicMock()
         client.create.return_value = session
 
         with mock.patch.dict(
-            "bespokelabs.sandbox.backends.BACKENDS", {"fake": lambda: client}, clear=False,
+            "bespokelabs.sandbox.backends.BACKENDS",
+            {"fake": lambda: client},
+            clear=False,
         ):
             with self.assertRaises(SandboxError):
                 Sandbox("fake", git_repo="https://example.com/x.git")
@@ -136,6 +165,7 @@ class DeclarativeWorkspaceTests(unittest.TestCase):
 
 
 class AsyncResumeTests(unittest.IsolatedAsyncioTestCase):
+
     async def test_async_resume_reattaches(self) -> None:
         from bespokelabs.sandbox import AsyncSandbox, AsyncSandboxClient
 
@@ -146,10 +176,13 @@ class AsyncResumeTests(unittest.IsolatedAsyncioTestCase):
 
             resumed = await AsyncSandboxClient("local").resume(state)
             self.addAsyncCleanup(resumed.destroy)
-            self.assertEqual(await resumed.read_file("/m.txt"), b"async-persist\n")
+            self.assertEqual(
+                await resumed.read_file("/m.txt"), b"async-persist\n"
+            )
 
 
 class BackendOptionsTests(unittest.TestCase):
+
     def test_backend_options_threaded_into_config(self) -> None:
         sb = Sandbox("local", backend_options={"unused": "ok"})
         self.addCleanup(sb.destroy)
@@ -162,15 +195,22 @@ class BackendOptionsTests(unittest.TestCase):
 
         fake_docker = mock.MagicMock()
         fake_container = mock.MagicMock()
-        fake_docker.from_env.return_value.containers.run.return_value = fake_container
+        fake_docker.from_env.return_value.containers.run.return_value = (
+            fake_container
+        )
 
         client = object.__new__(DockerClient)
         client._docker = fake_docker
         client._client = None
         import threading
+
         client._connect_lock = threading.Lock()
 
-        client.create(SandboxConfig(backend="docker", backend_options={"hostname": "myhost"}))
+        client.create(
+            SandboxConfig(
+                backend="docker", backend_options={"hostname": "myhost"}
+            )
+        )
 
         _, kwargs = fake_docker.from_env.return_value.containers.run.call_args
         self.assertEqual(kwargs["hostname"], "myhost")

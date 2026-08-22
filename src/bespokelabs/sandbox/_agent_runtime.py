@@ -69,7 +69,9 @@ def build_inside_shell_script(
     if cwd:
         lines.append(f"cd {shell_path(cwd)}")
 
-    command_line = " ".join(shell_arg(part, is_command=(idx == 0)) for idx, part in enumerate(command))
+    command_line = " ".join(
+        shell_arg(part, is_command=idx == 0) for idx, part in enumerate(command)
+    )
     if input_mode == "stdin":
         lines.append(f"printf %s {shlex.quote(prompt)} | {command_line}")
     elif input_mode == "argv":
@@ -98,7 +100,12 @@ def shell_arg(value: str, *, is_command: bool = False) -> str:
 def shell_path(path: str) -> str:
     if not path.startswith("/"):
         return shlex.quote(path)
-    escaped = path.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+    escaped = (
+        path.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("$", "\\$")
+        .replace("`", "\\`")
+    )
     return f'"${{SANDBOX_ROOT:-}}{escaped}"'
 
 
@@ -113,11 +120,17 @@ def _prepare_inline_shell_command(command: list[str]) -> list[str]:
 
 def _shell_code_index(command: list[str]) -> int | None:
     for index, arg in enumerate(command[1:], start=1):
-        if not (arg == "-c" or (arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:])):
+        if not (
+            arg == "-c"
+            or (
+                arg.startswith("-")
+                and not arg.startswith("--")
+                and "c" in arg[1:]
+            )
+        ):
             continue
         code_index = index + 1
         if code_index < len(command):
             return code_index
         return None
     return None
-
