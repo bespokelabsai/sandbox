@@ -1,3 +1,5 @@
+"""Shared value types for sandbox configuration, results, and usage."""
+
 from __future__ import annotations
 
 import json
@@ -104,7 +106,8 @@ class Usage:
             input_tokens=self.input_tokens + other.input_tokens,
             output_tokens=self.output_tokens + other.output_tokens,
             cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
-            cache_creation_tokens=self.cache_creation_tokens + other.cache_creation_tokens,
+            cache_creation_tokens=self.cache_creation_tokens
+            + other.cache_creation_tokens,
             llm_cost_usd=self.llm_cost_usd + other.llm_cost_usd,
             compute_cost_usd=self.compute_cost_usd + other.compute_cost_usd,
         )

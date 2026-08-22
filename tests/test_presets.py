@@ -4,7 +4,12 @@ import unittest
 from unittest import mock
 
 from bespokelabs.sandbox import Sandbox
-from bespokelabs.sandbox.presets import PRESETS, SandboxPreset, get_preset, register_preset
+from bespokelabs.sandbox.presets import (
+    PRESETS,
+    SandboxPreset,
+    get_preset,
+    register_preset,
+)
 from bespokelabs.sandbox.types import SandboxResult
 
 BUILT_IN_PRESETS = {"claude-code", "claude-code-codex", "codex"}
@@ -12,6 +17,7 @@ TENSORLAKE_NPM_PREFIX = "mkdir -p $HOME/.npm-global && npm config set prefix $HO
 
 
 class PresetTests(unittest.TestCase):
+
     def test_builtin_presets_are_limited_to_agent_clis(self) -> None:
         self.assertEqual(set(PRESETS), BUILT_IN_PRESETS)
 
@@ -20,7 +26,9 @@ class PresetTests(unittest.TestCase):
 
         self.assertEqual(preset.description, "Sandbox with Codex CLI installed")
         self.assertEqual(preset.image, "ghcr.io/bespokelabsai/sandbox/codex:v2")
-        self.assertEqual(preset.setup_commands, ["npm install -g @openai/codex"])
+        self.assertEqual(
+            preset.setup_commands, ["npm install -g @openai/codex"]
+        )
         self.assertEqual(
             preset.backend_setup_commands["tensorlake"],
             [
@@ -31,12 +39,21 @@ class PresetTests(unittest.TestCase):
         self.assertEqual(preset.timeout_secs, 1800)
         self.assertTrue(preset.allow_internet)
 
-    def test_claude_code_preset_is_registered_with_expected_defaults(self) -> None:
+    def test_claude_code_preset_is_registered_with_expected_defaults(
+        self,
+    ) -> None:
         preset = get_preset("claude-code")
 
-        self.assertEqual(preset.description, "Sandbox with Claude Code (Anthropic CLI) installed")
-        self.assertEqual(preset.image, "ghcr.io/bespokelabsai/sandbox/claude-code:v2")
-        self.assertEqual(preset.setup_commands, ["npm install -g @anthropic-ai/claude-code"])
+        self.assertEqual(
+            preset.description,
+            "Sandbox with Claude Code (Anthropic CLI) installed",
+        )
+        self.assertEqual(
+            preset.image, "ghcr.io/bespokelabsai/sandbox/claude-code:v2"
+        )
+        self.assertEqual(
+            preset.setup_commands, ["npm install -g @anthropic-ai/claude-code"]
+        )
         self.assertEqual(
             preset.backend_setup_commands["tensorlake"],
             [
@@ -47,12 +64,22 @@ class PresetTests(unittest.TestCase):
         self.assertEqual(preset.timeout_secs, 1800)
         self.assertTrue(preset.allow_internet)
 
-    def test_claude_code_codex_preset_is_registered_with_expected_defaults(self) -> None:
+    def test_claude_code_codex_preset_is_registered_with_expected_defaults(
+        self,
+    ) -> None:
         preset = get_preset("claude-code-codex")
 
-        self.assertEqual(preset.description, "Sandbox with Claude Code and Codex CLI installed")
-        self.assertEqual(preset.image, "ghcr.io/bespokelabsai/sandbox/claude-code-codex:v2")
-        self.assertEqual(preset.setup_commands, ["npm install -g @anthropic-ai/claude-code @openai/codex"])
+        self.assertEqual(
+            preset.description,
+            "Sandbox with Claude Code and Codex CLI installed",
+        )
+        self.assertEqual(
+            preset.image, "ghcr.io/bespokelabsai/sandbox/claude-code-codex:v2"
+        )
+        self.assertEqual(
+            preset.setup_commands,
+            ["npm install -g @anthropic-ai/claude-code @openai/codex"],
+        )
         self.assertEqual(
             preset.backend_setup_commands["tensorlake"],
             [
@@ -71,34 +98,42 @@ class PresetTests(unittest.TestCase):
 
 
 class PresetImageResolutionTests(unittest.TestCase):
-    """Verify how Sandbox(preset=..., backend=...) resolves the image field
-    and decides whether to run setup_commands. Covers the OCI-vs-tensorlake
-    split: preset.image targets docker/daytona/modal, preset.tensorlake_image
-    targets tensorlake."""
+    """Verify how presets resolve the image field.
+
+    These tests also decide whether to run setup_commands. They cover the
+    OCI-vs-tensorlake split: preset.image targets docker/daytona/modal, while
+    preset.tensorlake_image targets tensorlake.
+    """
 
     PRESET_NAME = "_test_dual_image"
     BACKEND_ONLY_PRESET_NAME = "_test_backend_only_setup"
 
     def setUp(self) -> None:
-        register_preset(SandboxPreset(
-            name=self.PRESET_NAME,
-            description="dual-image preset for testing",
-            image="ghcr.io/test/img:latest",
-            tensorlake_image="tl-name",
-            setup_commands=["echo hi"],
-        ))
-        register_preset(SandboxPreset(
-            name=self.BACKEND_ONLY_PRESET_NAME,
-            description="backend-only setup preset for testing",
-            backend_setup_commands={
-                "tensorlake": ["echo tensorlake"],
-            },
-        ))
+        register_preset(
+            SandboxPreset(
+                name=self.PRESET_NAME,
+                description="dual-image preset for testing",
+                image="ghcr.io/test/img:latest",
+                tensorlake_image="tl-name",
+                setup_commands=["echo hi"],
+            )
+        )
+        register_preset(
+            SandboxPreset(
+                name=self.BACKEND_ONLY_PRESET_NAME,
+                description="backend-only setup preset for testing",
+                backend_setup_commands={
+                    "tensorlake": ["echo tensorlake"],
+                },
+            )
+        )
 
         def _make_backend_client() -> mock.MagicMock:
             session = mock.MagicMock()
             session.execute_command.return_value = SandboxResult(
-                stdout="", stderr="", exit_code=0,
+                stdout="",
+                stderr="",
+                exit_code=0,
             )
             client = mock.MagicMock()
             client.create.return_value = session
@@ -159,7 +194,9 @@ class PresetImageResolutionTests(unittest.TestCase):
         sb._session.execute_command.assert_called()
 
     def test_tensorlake_git_repo_uses_relative_destination(self) -> None:
-        sb = Sandbox(backend="tensorlake", git_repo="https://github.com/acme/project.git")
+        sb = Sandbox(
+            backend="tensorlake", git_repo="https://github.com/acme/project.git"
+        )
 
         sb._session.execute_command.assert_called_once_with(
             "git clone --depth 1 https://github.com/acme/project.git project",

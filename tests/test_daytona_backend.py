@@ -9,7 +9,10 @@ from __future__ import annotations
 import unittest
 
 from bespokelabs.sandbox import Sandbox, SandboxPreset
-from bespokelabs.sandbox.exceptions import SandboxConfigurationError, SandboxCreationError
+from bespokelabs.sandbox.exceptions import (
+    SandboxConfigurationError,
+    SandboxCreationError,
+)
 from bespokelabs.sandbox.types import SandboxConfig
 
 try:
@@ -20,7 +23,11 @@ except ImportError:  # pragma: no cover - exercised only without the extra
     _HAS_DAYTONA = False
 
 if _HAS_DAYTONA:
-    from bespokelabs.sandbox.backends.daytona import _CREATE_TOKEN_LABEL, DaytonaClient, _build_params
+    from bespokelabs.sandbox.backends.daytona import (
+        _CREATE_TOKEN_LABEL,
+        DaytonaClient,
+        _build_params,
+    )
 
 
 # The exact shape of the failure seen in production: the create succeeded
@@ -31,10 +38,17 @@ _READ_TIMEOUT = "Failed to create sandbox: HTTPSConnectionPool(host='app.daytona
 
 
 class _FakeProcess:
+
     def __init__(self) -> None:
         self.calls: list[tuple[str, str | None]] = []
 
-    def exec(self, command: str, cwd: str | None = None, env: dict | None = None, timeout: int | None = None):
+    def exec(
+        self,
+        command: str,
+        cwd: str | None = None,
+        env: dict | None = None,
+        timeout: int | None = None,
+    ):
         self.calls.append((command, cwd))
         return _FakeResponse()
 
@@ -45,6 +59,7 @@ class _FakeResponse:
 
 
 class _FakeSandbox:
+
     def __init__(self, sandbox_id: str, labels: dict[str, str]) -> None:
         self.id = sandbox_id
         self.labels = labels
@@ -54,7 +69,12 @@ class _FakeSandbox:
 class _FakeDaytona:
     """Stand-in for ``daytona.Daytona`` with the same surface we depend on."""
 
-    def __init__(self, *, fail_with: BaseException | None = None, list_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_with: BaseException | None = None,
+        list_error: Exception | None = None,
+    ) -> None:
         self._fail_with = fail_with
         self._list_error = list_error
         self.live: list[_FakeSandbox] = []
@@ -66,7 +86,10 @@ class _FakeDaytona:
         self.created.append((params, kwargs))
         # Daytona builds the sandbox before the client ever sees a response,
         # so it exists even when the call goes on to fail.
-        sandbox = _FakeSandbox(f"sbx-{len(self.created)}", dict(getattr(params, "labels", None) or {}))
+        sandbox = _FakeSandbox(
+            f"sbx-{len(self.created)}",
+            dict(getattr(params, "labels", None) or {}),
+        )
         self.live.append(sandbox)
         if self._fail_with is not None:
             raise self._fail_with
@@ -76,9 +99,17 @@ class _FakeDaytona:
         self.list_queries.append(query)
         if self._list_error is not None:
             raise self._list_error
-        labels = (getattr(query, "labels", None) or {}) if query is not None else {}
+        labels = (
+            (getattr(query, "labels", None) or {}) if query is not None else {}
+        )
         # The real SDK returns an Iterator[Sandbox], not a list.
-        return iter([s for s in self.live if all(s.labels.get(k) == v for k, v in labels.items())])
+        return iter(
+            [
+                s
+                for s in self.live
+                if all(s.labels.get(k) == v for k, v in labels.items())
+            ]
+        )
 
     def delete(self, sandbox, timeout: float = 60, wait: bool = False) -> None:
         self.deleted.append(sandbox)
@@ -100,11 +131,15 @@ class DaytonaCreateLeakTests(unittest.TestCase):
         fake = _FakeDaytona(fail_with=RuntimeError(_READ_TIMEOUT))
 
         with self.assertRaises(SandboxCreationError) as ctx:
-            _client(fake).create(SandboxConfig(backend="daytona", snapshot_id="snap"))
+            _client(fake).create(
+                SandboxConfig(backend="daytona", snapshot_id="snap")
+            )
 
         self.assertIn("Read timed out", str(ctx.exception))
         self.assertEqual([s.id for s in fake.deleted], ["sbx-1"])
-        self.assertEqual(fake.live, [], "a started, billing sandbox was left behind")
+        self.assertEqual(
+            fake.live, [], "a started, billing sandbox was left behind"
+        )
 
     def test_orphan_is_found_by_a_label_unique_to_the_create_call(self) -> None:
         fake = _FakeDaytona(fail_with=RuntimeError(_READ_TIMEOUT))
@@ -116,7 +151,11 @@ class DaytonaCreateLeakTests(unittest.TestCase):
 
         tokens = [s.labels[_CREATE_TOKEN_LABEL] for s in fake.deleted]
         self.assertEqual(len(tokens), 2)
-        self.assertNotEqual(tokens[0], tokens[1], "the reap label must be unique per create call")
+        self.assertNotEqual(
+            tokens[0],
+            tokens[1],
+            "the reap label must be unique per create call",
+        )
         # Each reap deleted only its own sandbox, not everything with the label.
         for query, token in zip(fake.list_queries, tokens, strict=True):
             self.assertEqual(query.labels, {_CREATE_TOKEN_LABEL: token})
@@ -124,7 +163,9 @@ class DaytonaCreateLeakTests(unittest.TestCase):
     def test_caller_labels_cannot_displace_the_reap_label(self) -> None:
         fake = _FakeDaytona(fail_with=RuntimeError(_READ_TIMEOUT))
         config = SandboxConfig(
-            backend="daytona", snapshot_id="snap", backend_options={"labels": {"team": "platform"}}
+            backend="daytona",
+            snapshot_id="snap",
+            backend_options={"labels": {"team": "platform"}},
         )
 
         with self.assertRaises(SandboxCreationError):
@@ -137,20 +178,27 @@ class DaytonaCreateLeakTests(unittest.TestCase):
 
     def test_reap_failure_does_not_mask_the_creation_error(self) -> None:
         fake = _FakeDaytona(
-            fail_with=RuntimeError(_READ_TIMEOUT), list_error=RuntimeError("list is down too")
+            fail_with=RuntimeError(_READ_TIMEOUT),
+            list_error=RuntimeError("list is down too"),
         )
 
         with self.assertRaises(SandboxCreationError) as ctx:
-            _client(fake).create(SandboxConfig(backend="daytona", snapshot_id="snap"))
+            _client(fake).create(
+                SandboxConfig(backend="daytona", snapshot_id="snap")
+            )
 
         self.assertIn("Read timed out", str(ctx.exception))
         self.assertNotIn("list is down too", str(ctx.exception))
 
-    def test_keyboard_interrupt_during_create_reaps_and_propagates_unchanged(self) -> None:
+    def test_keyboard_interrupt_during_create_reaps_and_propagates_unchanged(
+        self,
+    ) -> None:
         fake = _FakeDaytona(fail_with=KeyboardInterrupt())
 
         with self.assertRaises(KeyboardInterrupt):
-            _client(fake).create(SandboxConfig(backend="daytona", snapshot_id="snap"))
+            _client(fake).create(
+                SandboxConfig(backend="daytona", snapshot_id="snap")
+            )
 
         self.assertEqual([s.id for s in fake.deleted], ["sbx-1"])
         self.assertEqual(fake.live, [])
@@ -158,7 +206,9 @@ class DaytonaCreateLeakTests(unittest.TestCase):
     def test_successful_create_reaps_nothing(self) -> None:
         fake = _FakeDaytona()
 
-        _client(fake).create(SandboxConfig(backend="daytona", snapshot_id="snap"))
+        _client(fake).create(
+            SandboxConfig(backend="daytona", snapshot_id="snap")
+        )
 
         self.assertEqual(fake.deleted, [])
         self.assertEqual(len(fake.live), 1)
@@ -166,9 +216,14 @@ class DaytonaCreateLeakTests(unittest.TestCase):
 
 @unittest.skipUnless(_HAS_DAYTONA, "Daytona SDK not installed")
 class DaytonaCreateTimeoutOptionTests(unittest.TestCase):
+
     def test_create_timeout_is_forwarded_to_the_sdk(self) -> None:
         fake = _FakeDaytona()
-        config = SandboxConfig(backend="daytona", snapshot_id="snap", backend_options={"create_timeout": 300})
+        config = SandboxConfig(
+            backend="daytona",
+            snapshot_id="snap",
+            backend_options={"create_timeout": 300},
+        )
 
         _client(fake).create(config)
 
@@ -180,13 +235,21 @@ class DaytonaCreateTimeoutOptionTests(unittest.TestCase):
     def test_create_timeout_defaults_to_the_sdk_default(self) -> None:
         fake = _FakeDaytona()
 
-        _client(fake).create(SandboxConfig(backend="daytona", snapshot_id="snap"))
+        _client(fake).create(
+            SandboxConfig(backend="daytona", snapshot_id="snap")
+        )
 
         self.assertEqual(fake.created[0][1], {})
 
-    def test_zero_create_timeout_is_rejected_because_it_means_no_timeout(self) -> None:
+    def test_zero_create_timeout_is_rejected_because_it_means_no_timeout(
+        self,
+    ) -> None:
         fake = _FakeDaytona()
-        config = SandboxConfig(backend="daytona", snapshot_id="snap", backend_options={"create_timeout": 0})
+        config = SandboxConfig(
+            backend="daytona",
+            snapshot_id="snap",
+            backend_options={"create_timeout": 0},
+        )
 
         with self.assertRaises(SandboxConfigurationError) as ctx:
             _client(fake).create(config)
@@ -200,18 +263,34 @@ class DaytonaDroppedConfigTests(unittest.TestCase):
     """timeout_secs and workdir must reach Daytona, not be silently discarded."""
 
     def _params(self, **config_kwargs):
-        config = SandboxConfig(backend="daytona", snapshot_id="snap", **config_kwargs)
+        config = SandboxConfig(
+            backend="daytona", snapshot_id="snap", **config_kwargs
+        )
         return _build_params(config, create_token="tok")
 
     def test_explicit_timeout_secs_is_not_silently_dropped(self) -> None:
         # The 24h lifetime a caller asks for has to arrive as a real bound.
-        params = self._params(timeout_secs=24 * 60 * 60, timeout_secs_explicit=True)
+        params = self._params(
+            timeout_secs=24 * 60 * 60, timeout_secs_explicit=True
+        )
         self.assertEqual(params.ttl_minutes, 1440)
 
-    def test_explicit_timeout_secs_rounds_up_and_never_floors_to_zero(self) -> None:
+    def test_explicit_timeout_secs_rounds_up_and_never_floors_to_zero(
+        self,
+    ) -> None:
         # ttl_minutes=0 means "no TTL" to Daytona, the opposite of a 30s bound.
-        self.assertEqual(self._params(timeout_secs=30, timeout_secs_explicit=True).ttl_minutes, 1)
-        self.assertEqual(self._params(timeout_secs=90, timeout_secs_explicit=True).ttl_minutes, 2)
+        self.assertEqual(
+            self._params(
+                timeout_secs=30, timeout_secs_explicit=True
+            ).ttl_minutes,
+            1,
+        )
+        self.assertEqual(
+            self._params(
+                timeout_secs=90, timeout_secs_explicit=True
+            ).ttl_minutes,
+            2,
+        )
 
     def test_unrequested_timeout_secs_sets_no_ttl_at_all(self) -> None:
         # ttl_minutes destroys the sandbox in any state and no activity resets
@@ -227,15 +306,21 @@ class DaytonaDroppedConfigTests(unittest.TestCase):
     def test_backend_options_can_still_set_the_ttl(self) -> None:
         # It overrides a derived TTL...
         params = self._params(
-            timeout_secs=600, timeout_secs_explicit=True, backend_options={"ttl_minutes": 5}
+            timeout_secs=600,
+            timeout_secs_explicit=True,
+            backend_options={"ttl_minutes": 5},
         )
         self.assertEqual(params.ttl_minutes, 5)
         # ...and remains the way to ask for one without a timeout_secs.
-        self.assertEqual(self._params(backend_options={"ttl_minutes": 5}).ttl_minutes, 5)
+        self.assertEqual(
+            self._params(backend_options={"ttl_minutes": 5}).ttl_minutes, 5
+        )
 
     def test_workdir_is_not_silently_dropped(self) -> None:
         fake = _FakeDaytona()
-        config = SandboxConfig(backend="daytona", snapshot_id="snap", workdir="/work/project")
+        config = SandboxConfig(
+            backend="daytona", snapshot_id="snap", workdir="/work/project"
+        )
 
         session = _client(fake).create(config)
         session.execute_command("pytest", ["-q"])
@@ -248,32 +333,48 @@ class DaytonaDroppedConfigTests(unittest.TestCase):
 
     def test_workdir_survives_session_state_and_resume(self) -> None:
         fake = _FakeDaytona()
-        config = SandboxConfig(backend="daytona", snapshot_id="snap", workdir="/work/project")
+        config = SandboxConfig(
+            backend="daytona", snapshot_id="snap", workdir="/work/project"
+        )
         client = _client(fake)
 
         state = client.create(config).session_state()
 
-        self.assertEqual(state, {"sandbox_id": "sbx-1", "workdir": "/work/project"})
+        self.assertEqual(
+            state, {"sandbox_id": "sbx-1", "workdir": "/work/project"}
+        )
         fake.get = lambda sandbox_id: fake.live[0]  # noqa: E731 - stand in for Daytona.get
         client.resume(state).execute_command("pwd")
-        self.assertEqual(fake.live[0].process.calls[-1], ("pwd", "/work/project"))
+        self.assertEqual(
+            fake.live[0].process.calls[-1], ("pwd", "/work/project")
+        )
 
     def test_session_state_omits_workdir_when_unset(self) -> None:
         fake = _FakeDaytona()
 
-        state = _client(fake).create(SandboxConfig(backend="daytona", snapshot_id="snap")).session_state()
+        state = (
+            _client(fake)
+            .create(SandboxConfig(backend="daytona", snapshot_id="snap"))
+            .session_state()
+        )
 
         self.assertEqual(state, {"sandbox_id": "sbx-1"})
 
     def test_backend_options_env_vars_do_not_clobber_the_env_dict(self) -> None:
         params = self._params(
             env_vars={"ANTHROPIC_API_KEY": "secret", "SHARED": "from-env-vars"},
-            backend_options={"env_vars": {"EXTRA": "1", "SHARED": "from-options"}},
+            backend_options={
+                "env_vars": {"EXTRA": "1", "SHARED": "from-options"}
+            },
         )
 
         self.assertEqual(
             params.env_vars,
-            {"ANTHROPIC_API_KEY": "secret", "SHARED": "from-options", "EXTRA": "1"},
+            {
+                "ANTHROPIC_API_KEY": "secret",
+                "SHARED": "from-options",
+                "EXTRA": "1",
+            },
         )
 
 
@@ -301,8 +402,12 @@ class TimeoutSecsExplicitnessTests(unittest.TestCase):
         self.assertEqual(config.timeout_secs, 600)
         self.assertFalse(config.timeout_secs_explicit)
 
-    def test_preset_timeout_secs_is_a_recommendation_not_a_request(self) -> None:
-        preset = SandboxPreset(name="_ttl_test", description="", timeout_secs=1800)
+    def test_preset_timeout_secs_is_a_recommendation_not_a_request(
+        self,
+    ) -> None:
+        preset = SandboxPreset(
+            name="_ttl_test", description="", timeout_secs=1800
+        )
 
         config = self._config(preset=preset)
 

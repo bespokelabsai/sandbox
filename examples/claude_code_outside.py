@@ -61,25 +61,43 @@ class SandboxShellBridge:
         bridge = self
 
         class Handler(BaseHTTPRequestHandler):
+
             def do_POST(self) -> None:
                 try:
                     payload = self._read_payload()
                     if payload.get("token") != bridge._token:
-                        self._send_json({"stderr": "invalid bridge token\n", "exit_code": 403}, status=403)
+                        self._send_json(
+                            {
+                                "stderr": "invalid bridge token\n",
+                                "exit_code": 403,
+                            },
+                            status=403,
+                        )
                         return
                     command = str(payload.get("command", "")).strip()
                     if not command:
-                        self._send_json({"stderr": "missing command\n", "exit_code": 2}, status=400)
+                        self._send_json(
+                            {"stderr": "missing command\n", "exit_code": 2},
+                            status=400,
+                        )
                         return
 
                     result = bridge._ctx.shell("bash", ["-lc", command])
-                    self._send_json({
-                        "stdout": result.stdout,
-                        "stderr": result.stderr,
-                        "exit_code": result.exit_code,
-                    })
+                    self._send_json(
+                        {
+                            "stdout": result.stdout,
+                            "stderr": result.stderr,
+                            "exit_code": result.exit_code,
+                        }
+                    )
                 except Exception as exc:
-                    self._send_json({"stderr": f"{type(exc).__name__}: {exc}\n", "exit_code": 1}, status=500)
+                    self._send_json(
+                        {
+                            "stderr": f"{type(exc).__name__}: {exc}\n",
+                            "exit_code": 1,
+                        },
+                        status=500,
+                    )
 
             def log_message(self, format: str, *args: Any) -> None:
                 del format, args
@@ -88,7 +106,9 @@ class SandboxShellBridge:
                 length = int(self.headers.get("Content-Length", "0"))
                 return json.loads(self.rfile.read(length).decode())
 
-            def _send_json(self, payload: dict[str, Any], *, status: int = 200) -> None:
+            def _send_json(
+                self, payload: dict[str, Any], *, status: int = 200
+            ) -> None:
                 body = json.dumps(payload).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
@@ -97,7 +117,9 @@ class SandboxShellBridge:
                 self.wfile.write(body)
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread = threading.Thread(
+            target=self._server.serve_forever, daemon=True
+        )
         self._thread.start()
 
         host, port = self._server.server_address
@@ -138,7 +160,9 @@ class SandboxShellBridge:
             raise SystemExit(int(payload.get("exit_code", 1)))
             """
         )
-        handle = tempfile.NamedTemporaryFile("w", prefix="sandbox-shell-", suffix=".py", delete=False)
+        handle = tempfile.NamedTemporaryFile(
+            "w", prefix="sandbox-shell-", suffix=".py", delete=False
+        )
         with handle:
             handle.write(script)
         path = Path(handle.name)
@@ -190,15 +214,21 @@ def run_claude_code_outside(ctx: AgentContext, prompt: str) -> SandboxResult:
     )
 
 
-def count_repo_root_files_with_claude(backend: str, repo: str, git_ref: str | None) -> SandboxResult:
+def count_repo_root_files_with_claude(
+    backend: str, repo: str, git_ref: str | None
+) -> SandboxResult:
     repo_name = _repo_name(repo)
     print(f"Creating {backend} sandbox and cloning {repo}...", flush=True)
-    with Sandbox(backend, git_repo=repo, git_ref=git_ref, timeout_secs=300) as sb:
-        agent = sb.agent(AgentSpec.outside(
-            name="claude-code",
-            capabilities=["shell"],
-            runner=run_claude_code_outside,
-        ))
+    with Sandbox(
+        backend, git_repo=repo, git_ref=git_ref, timeout_secs=300
+    ) as sb:
+        agent = sb.agent(
+            AgentSpec.outside(
+                name="claude-code",
+                capabilities=["shell"],
+                runner=run_claude_code_outside,
+            )
+        )
 
         prompt = (
             f"The repo is at /{repo_name}. Find the number of regular files "
@@ -224,7 +254,9 @@ def main() -> None:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("Error: ANTHROPIC_API_KEY is not set.")
 
-    result = count_repo_root_files_with_claude(args.backend, args.repo, args.git_ref)
+    result = count_repo_root_files_with_claude(
+        args.backend, args.repo, args.git_ref
+    )
     print(result.stdout)
 
     if result.stderr:

@@ -1,3 +1,5 @@
+"""Ray actor sandbox backend."""
+
 from __future__ import annotations
 
 import os
@@ -19,7 +21,12 @@ from bespokelabs.sandbox.exceptions import (
     SandboxCreationError,
     SandboxExecutionError,
 )
-from bespokelabs.sandbox.types import FileInfo, SandboxConfig, SandboxResult, SnapshotInfo
+from bespokelabs.sandbox.types import (
+    FileInfo,
+    SandboxConfig,
+    SandboxResult,
+    SnapshotInfo,
+)
 
 
 class RayClient:
@@ -58,7 +65,10 @@ class RayClient:
 
             @ray.remote
             class SandboxActor:
-                def __init__(self, env_vars: dict[str, str], timeout: int) -> None:
+
+                def __init__(
+                    self, env_vars: dict[str, str], timeout: int
+                ) -> None:
                     self.workdir = tempfile.mkdtemp(prefix="sandbox_ray_")
                     self.timeout = timeout
                     self.env = {**os.environ, **env_vars}
@@ -68,24 +78,38 @@ class RayClient:
                 def execute_code(self, code: str, language: str) -> dict:
                     resolved = self._resolve_interpreter(language)
                     if is_python_language(language):
-                        code = PYTHON_PREAMBLE + (
-                            "exec(compile(%r, \"<sandbox>\", \"exec\"), globals())\n" % code
+                        code = (
+                            PYTHON_PREAMBLE
+                            + f'exec(compile({code!r}, "<sandbox>", "exec"), globals())\n'
                         )
                     try:
                         result = subprocess.run(
                             [resolved, "-c", code],
                             capture_output=True,
+                            check=False,
                             text=True,
                             timeout=self.timeout,
                             cwd=self.workdir,
                             env=self.env,
                         )
-                        return {"stdout": result.stdout, "stderr": result.stderr, "exit_code": result.returncode}
+                        return {
+                            "stdout": result.stdout,
+                            "stderr": result.stderr,
+                            "exit_code": result.returncode,
+                        }
                     except subprocess.TimeoutExpired:
-                        return {"stdout": "", "stderr": f"Execution timed out after {self.timeout}s", "exit_code": 124}
+                        return {
+                            "stdout": "",
+                            "stderr": f"Execution timed out after {self.timeout}s",
+                            "exit_code": 124,
+                        }
 
                 def execute_command(self, cmd: list[str]) -> dict:
-                    if len(cmd) >= 3 and cmd[0] in ("sh", "bash", "zsh") and cmd[1] == "-c":
+                    if (
+                        len(cmd) >= 3
+                        and cmd[0] in ("sh", "bash", "zsh")
+                        and cmd[1] == "-c"
+                    ):
                         # Shell string form (including nested shells from the
                         # args path): apply prelude and rewrite redirections.
                         shell_cmd = rewrite_redirects(cmd[2])
@@ -103,18 +127,29 @@ class RayClient:
                         result = subprocess.run(
                             cmd,
                             capture_output=True,
+                            check=False,
                             text=True,
                             timeout=self.timeout,
                             cwd=self.workdir,
                             env=self.env,
                         )
-                        return {"stdout": result.stdout, "stderr": result.stderr, "exit_code": result.returncode}
+                        return {
+                            "stdout": result.stdout,
+                            "stderr": result.stderr,
+                            "exit_code": result.returncode,
+                        }
                     except subprocess.TimeoutExpired:
-                        return {"stdout": "", "stderr": f"Command timed out after {self.timeout}s", "exit_code": 124}
+                        return {
+                            "stdout": "",
+                            "stderr": f"Command timed out after {self.timeout}s",
+                            "exit_code": 124,
+                        }
 
                 def _resolve_interpreter(self, language: str) -> str:
                     if language in ("python", "python3"):
-                        env_path = self.env.get("PATH", os.environ.get("PATH", ""))
+                        env_path = self.env.get(
+                            "PATH", os.environ.get("PATH", "")
+                        )
                         alt = "python3" if language == "python" else "python"
                         if shutil.which(language, path=env_path):
                             return language
@@ -160,11 +195,13 @@ class RayClient:
                     if os.path.exists(self.workdir):
                         shutil.rmtree(self.workdir, ignore_errors=True)
 
-            ActorWithCpu = SandboxActor.options(num_cpus=config.cpu)
-            actor = ActorWithCpu.remote(env_vars, config.timeout_secs)
+            actor_with_cpu = SandboxActor.options(num_cpus=config.cpu)
+            actor = actor_with_cpu.remote(env_vars, config.timeout_secs)
             return RaySession(ray=ray, actor=actor)
         except Exception as exc:
-            raise SandboxCreationError(f"Failed to create Ray sandbox: {exc}") from exc
+            raise SandboxCreationError(
+                f"Failed to create Ray sandbox: {exc}"
+            ) from exc
 
     def resume(self, data: dict) -> RaySession:
         raise FeatureNotSupportedError(
@@ -179,14 +216,22 @@ class RaySession:
         self._ray = ray
         self._actor: object = actor
 
-    def execute_code(self, code: str, language: str = "python") -> SandboxResult:
+    def execute_code(
+        self, code: str, language: str = "python"
+    ) -> SandboxResult:
         try:
-            result = self._ray.get(self._actor.execute_code.remote(code, language))
+            result = self._ray.get(
+                self._actor.execute_code.remote(code, language)
+            )
             return SandboxResult(**result)
         except Exception as exc:
-            raise SandboxExecutionError(f"Ray code execution failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Ray code execution failed: {exc}"
+            ) from exc
 
-    def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult:
+    def execute_command(
+        self, command: str, args: list[str] | None = None
+    ) -> SandboxResult:
         try:
             if args:
                 cmd = [command] + args
@@ -195,14 +240,18 @@ class RaySession:
             result = self._ray.get(self._actor.execute_command.remote(cmd))
             return SandboxResult(**result)
         except Exception as exc:
-            raise SandboxExecutionError(f"Ray command execution failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Ray command execution failed: {exc}"
+            ) from exc
 
     def list_files(self, path: str = "/") -> list[FileInfo]:
         try:
             entries = self._ray.get(self._actor.list_files.remote(path))
             return [FileInfo(**e) for e in entries]
         except Exception as exc:
-            raise SandboxExecutionError(f"Ray list_files failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Ray list_files failed: {exc}"
+            ) from exc
 
     def read_file(self, path: str) -> bytes:
         try:
@@ -215,21 +264,27 @@ class RaySession:
             data = content if isinstance(content, bytes) else content.encode()
             self._ray.get(self._actor.write_file.remote(path, data))
         except Exception as exc:
-            raise SandboxExecutionError(f"Ray write_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Ray write_file failed: {exc}"
+            ) from exc
 
     def upload_file(self, local_path: str, remote_path: str) -> None:
         try:
             data = pathlib.Path(local_path).read_bytes()
             self._ray.get(self._actor.upload_file.remote(data, remote_path))
         except Exception as exc:
-            raise SandboxExecutionError(f"Ray upload_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Ray upload_file failed: {exc}"
+            ) from exc
 
     def download_file(self, remote_path: str, local_path: str) -> None:
         try:
             data = self._ray.get(self._actor.download_file.remote(remote_path))
             pathlib.Path(local_path).write_bytes(data)
         except Exception as exc:
-            raise SandboxExecutionError(f"Ray download_file failed: {exc}") from exc
+            raise SandboxExecutionError(
+                f"Ray download_file failed: {exc}"
+            ) from exc
 
     def snapshot(self) -> SnapshotInfo:
         raise FeatureNotSupportedError(

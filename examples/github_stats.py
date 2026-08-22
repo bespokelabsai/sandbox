@@ -33,7 +33,9 @@ class RepoStats(BaseModel):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Fetch GitHub repo stats via Codex in a sandbox")
+    parser = argparse.ArgumentParser(
+        description="Fetch GitHub repo stats via Codex in a sandbox"
+    )
     parser.add_argument(
         "--repo",
         default="bespokelabs/curator",
@@ -45,19 +47,35 @@ def main() -> None:
     if not api_key:
         sys.exit("Set OPENAI_API_KEY before running this example.")
 
-    prompt = f"Look up the GitHub repository {args.repo}. {json_schema(RepoStats)}"
+    prompt = (
+        f"Look up the GitHub repository {args.repo}. {json_schema(RepoStats)}"
+    )
 
     print(f"Fetching stats for {args.repo} using Codex...\n")
 
-    with Sandbox("local", preset="codex", env_vars={"OPENAI_API_KEY": api_key}, workdir=WORKDIR) as sb:
+    with Sandbox(
+        "local",
+        preset="codex",
+        env_vars={"OPENAI_API_KEY": api_key},
+        workdir=WORKDIR,
+    ) as sb:
         try:
-            result = sb.execute_command("codex", args=[
-                "exec", "--full-auto", "--skip-git-repo-check", "--search",
-                "-o", OUTPUT_FILE,
-                prompt,
-            ])
+            result = sb.execute_command(
+                "codex",
+                args=[
+                    "exec",
+                    "--full-auto",
+                    "--skip-git-repo-check",
+                    "--search",
+                    "-o",
+                    OUTPUT_FILE,
+                    prompt,
+                ],
+            )
             if result.exit_code != 0:
-                sys.exit(f"Codex failed (exit {result.exit_code}):\n{result.stderr[:500]}")
+                sys.exit(
+                    f"Codex failed (exit {result.exit_code}):\n{result.stderr[:500]}"
+                )
 
             raw = sb.read_file(OUTPUT_FILE).decode()
             stats = Sandbox.parse_as(raw, RepoStats)

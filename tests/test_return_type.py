@@ -49,7 +49,7 @@ class TestReturnTypeExecuteCode(unittest.TestCase):
         self.assertEqual(result.message, "hello")
 
     def test_json_with_surrounding_text(self):
-        code = 'print("Here is the result:\\n{\\\"message\\\": \\\"world\\\"}\\nDone.")'
+        code = 'print("Here is the result:\\n{\\"message\\": \\"world\\"}\\nDone.")'
         result = self.sb.execute_code(code, return_type=Greeting)
         self.assertIsInstance(result, Greeting)
         self.assertEqual(result.message, "world")
@@ -66,7 +66,9 @@ class TestReturnTypeExecuteCode(unittest.TestCase):
 
     def test_missing_required_field_raises(self):
         """Missing a required field should raise SandboxExecutionError, not ValidationError."""
-        code = 'import json; print(json.dumps({"mean": 3.14}))'  # missing 'count'
+        code = (
+            'import json; print(json.dumps({"mean": 3.14}))'  # missing 'count'
+        )
         with self.assertRaises(SandboxExecutionError):
             self.sb.execute_code(code, return_type=Stats)
 
@@ -106,8 +108,10 @@ class TestReturnTypeExecuteCommand(unittest.TestCase):
         self.assertEqual(result.message, "from_cmd")
 
     def test_command_inject_schema(self):
-        """With inject_schema=True, schema is appended to last arg.
-        The JSON extractor should still find the original JSON object."""
+        """Verify inject_schema appends the schema to the last argument.
+
+        The JSON extractor should still find the original JSON object.
+        """
         result = self.sb.execute_command(
             "echo",
             args=['{"message": "injected"}'],

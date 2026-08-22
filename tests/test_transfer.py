@@ -13,7 +13,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from bespokelabs.sandbox import AsyncSandbox, Sandbox, WorkspaceError, _transfer, build_files_map
+from bespokelabs.sandbox import (
+    AsyncSandbox,
+    Sandbox,
+    WorkspaceError,
+    _transfer,
+    build_files_map,
+)
 from bespokelabs.sandbox.exceptions import SandboxError
 from bespokelabs.sandbox.types import SandboxResult
 
@@ -32,17 +38,33 @@ def _make_tree(root: Path) -> Path:
 
 
 class UploadDirTests(unittest.TestCase):
+
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.src = _make_tree(Path(self._tmp.name))
 
-    def _assert_uploaded(self, sb: Sandbox, dest: str, *, expect_exec: bool) -> None:
-        listing = sb.execute_command("sh", ["-c", f"find {dest} -type f | sort"])
-        rels = sorted(line[len(dest):].lstrip("/") for line in listing.stdout.splitlines() if line.strip())
-        self.assertEqual(rels, ["SKILL.md", "reference/notes.md", "scripts/greet.sh"])
-        self.assertEqual(sb.read_file(f"{dest}/SKILL.md").decode(), "---\nname: demo\n---\n")
-        xbit = sb.execute_command("sh", ["-c", f"test -x {dest}/scripts/greet.sh && echo yes || echo no"])
+    def _assert_uploaded(
+        self, sb: Sandbox, dest: str, *, expect_exec: bool
+    ) -> None:
+        listing = sb.execute_command(
+            "sh", ["-c", f"find {dest} -type f | sort"]
+        )
+        rels = sorted(
+            line[len(dest) :].lstrip("/")
+            for line in listing.stdout.splitlines()
+            if line.strip()
+        )
+        self.assertEqual(
+            rels, ["SKILL.md", "reference/notes.md", "scripts/greet.sh"]
+        )
+        self.assertEqual(
+            sb.read_file(f"{dest}/SKILL.md").decode(), "---\nname: demo\n---\n"
+        )
+        xbit = sb.execute_command(
+            "sh",
+            ["-c", f"test -x {dest}/scripts/greet.sh && echo yes || echo no"],
+        )
         self.assertEqual(xbit.stdout.strip(), "yes" if expect_exec else "no")
 
     def test_upload_dir_tar_preserves_tree_and_exec_bit(self) -> None:
@@ -71,7 +93,9 @@ class UploadDirTests(unittest.TestCase):
         self.addCleanup(sb.destroy)
         sb.upload_dir(self.src, "dest/slash/", method="tar")
         # No double-slash dir was created.
-        self.assertEqual(sb.read_file("dest/slash/SKILL.md").decode().splitlines()[0], "---")
+        self.assertEqual(
+            sb.read_file("dest/slash/SKILL.md").decode().splitlines()[0], "---"
+        )
 
     def test_empty_source_is_a_noop(self) -> None:
         sb = Sandbox("local")
@@ -100,6 +124,7 @@ class UploadDirTests(unittest.TestCase):
 
 
 class DownloadDirTests(unittest.TestCase):
+
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
@@ -110,10 +135,16 @@ class DownloadDirTests(unittest.TestCase):
         with Sandbox("local") as sb:
             sb.upload_dir(self.src, "rt", method="tar")
             n = sb.download_dir("rt", out, method=method)
-        rels = sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())
-        self.assertEqual(rels, ["SKILL.md", "reference/notes.md", "scripts/greet.sh"])
+        rels = sorted(
+            p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file()
+        )
+        self.assertEqual(
+            rels, ["SKILL.md", "reference/notes.md", "scripts/greet.sh"]
+        )
         self.assertEqual(n, 3)
-        self.assertEqual((out / "reference" / "notes.md").read_text(), "notes\n")
+        self.assertEqual(
+            (out / "reference" / "notes.md").read_text(), "notes\n"
+        )
 
     def test_download_dir_tar_roundtrip(self) -> None:
         self._roundtrip("tar")
@@ -127,13 +158,16 @@ class DownloadDirTests(unittest.TestCase):
     def test_download_creates_local_parent(self) -> None:
         with Sandbox("local") as sb:
             sb.upload_dir(self.src, "rt2", method="tar")
-            nested = Path(self._tmp.name) / "a" / "b" / "c"  # does not exist yet
+            nested = (
+                Path(self._tmp.name) / "a" / "b" / "c"
+            )  # does not exist yet
             n = sb.download_dir("rt2", nested, method="tar")
         self.assertEqual(n, 3)
         self.assertTrue((nested / "SKILL.md").is_file())
 
 
 class BuildFilesMapTests(unittest.TestCase):
+
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
@@ -143,14 +177,20 @@ class BuildFilesMapTests(unittest.TestCase):
         fm = build_files_map(self.src, "remote/dir")
         self.assertEqual(
             sorted(fm),
-            ["remote/dir/SKILL.md", "remote/dir/reference/notes.md", "remote/dir/scripts/greet.sh"],
+            [
+                "remote/dir/SKILL.md",
+                "remote/dir/reference/notes.md",
+                "remote/dir/scripts/greet.sh",
+            ],
         )
         self.assertEqual(fm["remote/dir/reference/notes.md"], b"notes\n")
 
     def test_seeds_sandbox_at_creation(self) -> None:
         fm = build_files_map(self.src, "seeded")
         with Sandbox("local", files=fm) as sb:
-            self.assertEqual(sb.read_file("seeded/SKILL.md").decode().splitlines()[0], "---")
+            self.assertEqual(
+                sb.read_file("seeded/SKILL.md").decode().splitlines()[0], "---"
+            )
 
     def test_missing_source_raises(self) -> None:
         with self.assertRaises(NotADirectoryError):
@@ -158,6 +198,7 @@ class BuildFilesMapTests(unittest.TestCase):
 
 
 class AsyncTransferTests(unittest.IsolatedAsyncioTestCase):
+
     async def test_async_upload_download_roundtrip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src = _make_tree(Path(tmp))
@@ -207,7 +248,9 @@ class SymlinkSourceTests(unittest.TestCase):
         for method in ("tar", "per_file"):
             with Sandbox("local") as sb:
                 n = sb.upload_dir(self.src, f"d/{method}", method=method)
-                listing = sb.execute_command("sh", ["-c", f"find d/{method} -type f | sort"]).stdout
+                listing = sb.execute_command(
+                    "sh", ["-c", f"find d/{method} -type f | sort"]
+                ).stdout
             self.assertEqual(n, 1, method)
             self.assertIn(f"d/{method}/real.txt", listing)
             self.assertNotIn("link.txt", listing)
@@ -275,8 +318,11 @@ class SafeExtractTests(unittest.TestCase):
 
 
 class _UploadOnlySandbox:
-    """A backend whose upload_file carries bytes only (no mode) — like several cloud
-    backends, and unlike the local backend's mode-preserving shutil.copy2."""
+    """A backend whose upload_file carries bytes only, without mode information.
+
+    This matches several cloud backends and differs from the local backend's
+    mode-preserving shutil.copy2 implementation.
+    """
 
     backend_name = "fake"
 
@@ -288,14 +334,24 @@ class _UploadOnlySandbox:
     def upload_file(self, local: str, remote: str) -> None:
         self.uploaded.append((local, remote))
 
-    def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult:
+    def execute_command(
+        self, command: str, args: list[str] | None = None
+    ) -> SandboxResult:
         self.commands.append((command, args))
-        return SandboxResult(stdout="", stderr="boom" if self._exit_code else "", exit_code=self._exit_code)
+        return SandboxResult(
+            stdout="",
+            stderr="boom" if self._exit_code else "",
+            exit_code=self._exit_code,
+        )
 
-    def write_file(self, path: str, content) -> None:  # pragma: no cover - unused here
+    def write_file(
+        self, path: str, content
+    ) -> None:  # pragma: no cover - unused here
         pass
 
-    def download_file(self, remote: str, local: str) -> None:  # pragma: no cover - unused here
+    def download_file(
+        self, remote: str, local: str
+    ) -> None:  # pragma: no cover - unused here
         pass
 
 
@@ -308,7 +364,11 @@ class UploadDirExecBitTests(unittest.TestCase):
         self.src = _make_tree(Path(self._tmp.name))  # scripts/greet.sh is 0o755
 
     def _chmod_cmds(self, sb: _UploadOnlySandbox) -> list[str]:
-        return [args[1] for cmd, args in sb.commands if cmd == "sh" and args and "chmod +x" in args[1]]
+        return [
+            args[1]
+            for cmd, args in sb.commands
+            if cmd == "sh" and args and "chmod +x" in args[1]
+        ]
 
     def test_per_file_restores_exec_bit(self) -> None:
         sb = _UploadOnlySandbox()

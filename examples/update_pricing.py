@@ -21,7 +21,13 @@ from pydantic import BaseModel
 
 from bespokelabs.sandbox import Sandbox, SandboxExecutionError, json_schema
 
-PRICING_JSON = Path(__file__).resolve().parent.parent / "src" / "bespokelabs" / "sandbox" / "pricing.json"
+PRICING_JSON = (
+    Path(__file__).resolve().parent.parent
+    / "src"
+    / "bespokelabs"
+    / "sandbox"
+    / "pricing.json"
+)
 WORKDIR = os.path.join(os.path.dirname(__file__), ".sandbox_workdir")
 
 # Cloud providers whose pricing we fetch. Local backends (local, docker,
@@ -77,12 +83,21 @@ Rules:
 def fetch_provider_pricing(sb, provider_key: str) -> ProviderPricing | None:
     """Ask Claude Code inside the sandbox to look up pricing for one provider."""
     provider = CLOUD_PROVIDERS[provider_key]
-    prompt = PROMPT_TEMPLATE.format(**provider, schema=json_schema(ProviderPricing))
+    prompt = PROMPT_TEMPLATE.format(
+        **provider, schema=json_schema(ProviderPricing)
+    )
 
     try:
         return sb.execute_command(
             "claude",
-            args=["-p", prompt, "--output-format", "text", "--allowedTools", "WebSearch,WebFetch"],
+            args=[
+                "-p",
+                prompt,
+                "--output-format",
+                "text",
+                "--allowedTools",
+                "WebSearch,WebFetch",
+            ],
             return_type=ProviderPricing,
         )
     except SandboxExecutionError as e:
@@ -91,14 +106,22 @@ def fetch_provider_pricing(sb, provider_key: str) -> ProviderPricing | None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Fetch sandbox pricing and update pricing.json")
+    parser = argparse.ArgumentParser(
+        description="Fetch sandbox pricing and update pricing.json"
+    )
     parser.add_argument(
         "--providers",
         default=",".join(CLOUD_PROVIDERS),
         help=f"Comma-separated providers to update (choices: {', '.join(CLOUD_PROVIDERS)})",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Print fetched pricing without writing to file")
-    parser.add_argument("--model", default=None, help="Claude model to use (e.g. sonnet, haiku)")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print fetched pricing without writing to file",
+    )
+    parser.add_argument(
+        "--model", default=None, help="Claude model to use (e.g. sonnet, haiku)"
+    )
     args = parser.parse_args()
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -108,7 +131,9 @@ def main() -> None:
     providers = [p.strip() for p in args.providers.split(",") if p.strip()]
     unknown = [p for p in providers if p not in CLOUD_PROVIDERS]
     if unknown:
-        sys.exit(f"Unknown provider(s): {', '.join(unknown)}. Choose from: {', '.join(CLOUD_PROVIDERS)}")
+        sys.exit(
+            f"Unknown provider(s): {', '.join(unknown)}. Choose from: {', '.join(CLOUD_PROVIDERS)}"
+        )
 
     # Load existing pricing
     with open(PRICING_JSON) as f:
@@ -121,7 +146,9 @@ def main() -> None:
     if args.model:
         env_vars["CLAUDE_MODEL"] = args.model
 
-    with Sandbox("local", preset="claude-code", env_vars=env_vars, workdir=WORKDIR) as sb:
+    with Sandbox(
+        "local", preset="claude-code", env_vars=env_vars, workdir=WORKDIR
+    ) as sb:
         for provider_key in providers:
             print(f"  Fetching {provider_key}...")
             result = fetch_provider_pricing(sb, provider_key)
@@ -130,7 +157,9 @@ def main() -> None:
                 continue
 
             pricing["backends"][provider_key] = result.model_dump()
-            print(f"  OK: {provider_key} -> ${result.vcpu_per_hour_usd}/vCPU-hr\n")
+            print(
+                f"  OK: {provider_key} -> ${result.vcpu_per_hour_usd}/vCPU-hr\n"
+            )
 
     pricing["last_updated"] = date.today().isoformat()
 

@@ -46,10 +46,19 @@ _HAS_DATA_FILTER = hasattr(tarfile, "data_filter")
 class _Transferable(Protocol):
     """The slice of the Sandbox surface the transfer helpers rely on."""
 
-    def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult: ...
-    def write_file(self, path: str, content: bytes | str) -> None: ...
-    def upload_file(self, local_path: str, remote_path: str) -> None: ...
-    def download_file(self, remote_path: str, local_path: str) -> None: ...
+    def execute_command(
+        self, command: str, args: list[str] | None = None
+    ) -> SandboxResult:
+        ...
+
+    def write_file(self, path: str, content: bytes | str) -> None:
+        ...
+
+    def upload_file(self, local_path: str, remote_path: str) -> None:
+        ...
+
+    def download_file(self, remote_path: str, local_path: str) -> None:
+        ...
 
 
 def _iter_files(local_dir: Path) -> Iterator[tuple[Path, str]]:
@@ -72,7 +81,9 @@ def _iter_files(local_dir: Path) -> Iterator[tuple[Path, str]]:
             abs_path = Path(root) / name
             if abs_path.is_symlink():
                 continue
-            matches.append((abs_path, abs_path.relative_to(local_dir).as_posix()))
+            matches.append(
+                (abs_path, abs_path.relative_to(local_dir).as_posix())
+            )
     matches.sort(key=lambda pair: pair[1])
     yield from matches
 
@@ -84,7 +95,9 @@ def _check_method(method: str) -> None:
 
 def _has_tar(sb: _Transferable) -> bool:
     """Return True if ``tar`` is on PATH inside the sandbox."""
-    res = sb.execute_command("sh", ["-c", "command -v tar >/dev/null 2>&1 && echo yes || echo no"])
+    res = sb.execute_command(
+        "sh", ["-c", "command -v tar >/dev/null 2>&1 && echo yes || echo no"]
+    )
     return res.stdout.strip() == "yes"
 
 
@@ -101,10 +114,19 @@ def build_files_map(local_dir: str | Path, remote_dir: str) -> dict[str, bytes]:
     Symlinks in the tree are skipped (links are never followed off-tree).
     """
     base = _normalize(local_dir, remote_dir)
-    return {f"{base[1]}/{rel}": abs_path.read_bytes() for abs_path, rel in _iter_files(base[0])}
+    return {
+        f"{base[1]}/{rel}": abs_path.read_bytes()
+        for abs_path, rel in _iter_files(base[0])
+    }
 
 
-def upload_dir(sb: _Transferable, local_dir: str | Path, remote_dir: str, *, method: str = "auto") -> int:
+def upload_dir(
+    sb: _Transferable,
+    local_dir: str | Path,
+    remote_dir: str,
+    *,
+    method: str = "auto",
+) -> int:
     """Upload a local directory tree into a live sandbox; return the file count.
 
     See :meth:`Sandbox.upload_dir` for the user-facing contract.
@@ -122,7 +144,13 @@ def upload_dir(sb: _Transferable, local_dir: str | Path, remote_dir: str, *, met
     return len(files)
 
 
-def download_dir(sb: _Transferable, remote_dir: str, local_dir: str | Path, *, method: str = "auto") -> int:
+def download_dir(
+    sb: _Transferable,
+    remote_dir: str,
+    local_dir: str | Path,
+    *,
+    method: str = "auto",
+) -> int:
     """Download a directory tree out of a live sandbox; return the file count.
 
     See :meth:`Sandbox.download_dir` for the user-facing contract.
@@ -147,7 +175,9 @@ def _normalize(local_dir: str | Path, remote_dir: str) -> tuple[Path, str]:
     return src, remote_dir.rstrip("/")
 
 
-def _upload_per_file(sb: _Transferable, base: str, files: list[tuple[Path, str]]) -> None:
+def _upload_per_file(
+    sb: _Transferable, base: str, files: list[tuple[Path, str]]
+) -> None:
     """Upload each file with upload_file, then restore the executable bit.
 
     upload_file is bytes-only on several backends (it carries no mode), so any
@@ -174,7 +204,9 @@ def _upload_per_file(sb: _Transferable, base: str, files: list[tuple[Path, str]]
             )
 
 
-def _upload_tar(sb: _Transferable, base: str, files: list[tuple[Path, str]]) -> None:
+def _upload_tar(
+    sb: _Transferable, base: str, files: list[tuple[Path, str]]
+) -> None:
     """Pack *files* into one gzipped tar, upload it, and extract it under *base*."""
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
@@ -185,7 +217,9 @@ def _upload_tar(sb: _Transferable, base: str, files: list[tuple[Path, str]]) -> 
     sb.write_file(archive, buf.getvalue())
     qd, qa = shlex.quote(base), shlex.quote(archive)
     # Always remove the staged archive, then propagate the extract's exit code.
-    script = f"mkdir -p {qd} && tar -xzf {qa} -C {qd}; rc=$?; rm -f {qa}; exit $rc"
+    script = (
+        f"mkdir -p {qd} && tar -xzf {qa} -C {qd}; rc=$?; rm -f {qa}; exit $rc"
+    )
     res = sb.execute_command("sh", ["-c", script])
     if res.exit_code != 0:
         raise WorkspaceError(
@@ -231,11 +265,11 @@ def _download_per_file(sb: _Transferable, base: str, dest: Path) -> int:
             context={"source": base, "exit_code": res.exit_code},
         )
     count = 0
-    for remote_path in res.stdout.splitlines():
-        remote_path = remote_path.strip()
+    for line in res.stdout.splitlines():
+        remote_path = line.strip()
         if not remote_path:
             continue
-        rel = remote_path[len(base):].lstrip("/")
+        rel = remote_path[len(base) :].lstrip("/")
         target = dest / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         sb.download_file(remote_path, str(target))
@@ -261,15 +295,18 @@ def _safe_extract(tar: tarfile.TarFile, dest: Path) -> None:
     for member in tar.getmembers():
         if member.issym() or member.islnk():
             raise WorkspaceError(
-                f"refusing link member in archive: {member.name!r}", op="extract"
+                f"refusing link member in archive: {member.name!r}",
+                op="extract",
             )
         if member.isdev():
             raise WorkspaceError(
-                f"refusing device/special member in archive: {member.name!r}", op="extract"
+                f"refusing device/special member in archive: {member.name!r}",
+                op="extract",
             )
         target = (dest / member.name).resolve()
         if target != dest and dest not in target.parents:
             raise WorkspaceError(
-                f"refusing path-traversal in archive member: {member.name!r}", op="extract"
+                f"refusing path-traversal in archive member: {member.name!r}",
+                op="extract",
             )
     tar.extractall(dest)

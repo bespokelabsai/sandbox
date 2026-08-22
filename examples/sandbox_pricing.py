@@ -16,7 +16,9 @@ PROVIDERS = {
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Fetch cloud sandbox pricing using Claude Code")
+    parser = argparse.ArgumentParser(
+        description="Fetch cloud sandbox pricing using Claude Code"
+    )
     parser.add_argument(
         "--providers",
         default=",".join(PROVIDERS),
@@ -32,7 +34,9 @@ def main() -> None:
     names = [n.strip() for n in args.providers.split(",") if n.strip()]
     unknown = [n for n in names if n not in PROVIDERS]
     if unknown:
-        sys.exit(f"Unknown provider(s): {', '.join(unknown)}. Choose from: {', '.join(PROVIDERS)}")
+        sys.exit(
+            f"Unknown provider(s): {', '.join(unknown)}. Choose from: {', '.join(PROVIDERS)}"
+        )
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
@@ -74,9 +78,12 @@ def main() -> None:
         workdir=WORKDIR,
     ) as sb:
         claude_args = [
-            "-p", prompt,
-            "--output-format", "text",
-            "--allowedTools", "WebSearch,WebFetch",
+            "-p",
+            prompt,
+            "--output-format",
+            "text",
+            "--allowedTools",
+            "WebSearch,WebFetch",
         ]
         if args.model:
             claude_args += ["--model", args.model]

@@ -1,5 +1,4 @@
-"""
-Upload a Claude Code *skill* into a sandbox, then have Claude Code use it.
+"""Upload a Claude Code *skill* into a sandbox, then have Claude Code use it.
 
 A skill is a folder under `.claude/skills/<name>/` holding a `SKILL.md` with
 YAML frontmatter (a `name` and a `description`). Claude Code auto-discovers
@@ -67,7 +66,9 @@ def upload_and_verify(sb: Sandbox) -> None:
     landed = sb.read_file(REMOTE_SKILL_PATH).decode()
     print(f"Uploaded {SKILL_FILE.name} -> {REMOTE_SKILL_PATH}")
     print(f"  SKILL.md starts with: {landed.splitlines()[0]!r}")
-    listing = sb.execute_command("bash", args=["-c", "find .claude/skills -type f | sort"])
+    listing = sb.execute_command(
+        "bash", args=["-c", "find .claude/skills -type f | sort"]
+    )
     for line in listing.stdout.splitlines():
         print("   ", line)
 
@@ -76,7 +77,9 @@ def run_claude(sb: Sandbox) -> int:
     """Prompt Claude Code to use the uploaded skill; print the monologue."""
     print("\nAsking Claude Code to use the skill...\n")
     # -p: non-interactive single prompt. --output-format text: plain text out.
-    result = sb.execute_command("claude", args=["-p", PROMPT, "--output-format", "text"])
+    result = sb.execute_command(
+        "claude", args=["-p", PROMPT, "--output-format", "text"]
+    )
     print("--- pirate monologue ---")
     print(result.stdout.strip())
     if result.stderr:
@@ -89,7 +92,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Upload a skill into a sandbox and have Claude Code use it"
     )
-    parser.add_argument("--backend", default="local", help="Sandbox backend (default: local)")
+    parser.add_argument(
+        "--backend", default="local", help="Sandbox backend (default: local)"
+    )
     args = parser.parse_args()
 
     if not SKILL_FILE.is_file():
@@ -113,7 +118,9 @@ def main() -> None:
         if not api_key:
             missing.append("ANTHROPIC_API_KEY")
         if args.backend == "local" and not shutil.which("claude"):
-            missing.append("the `claude` CLI (npm install -g @anthropic-ai/claude-code)")
+            missing.append(
+                "the `claude` CLI (npm install -g @anthropic-ai/claude-code)"
+            )
         if missing:
             print(
                 "\nSkill uploaded and verified. To watch Claude Code use it, provide: "

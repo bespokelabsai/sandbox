@@ -39,6 +39,7 @@ all = [
     "ray>=2.0.0",
 ]
 dev = [
+    "pyink>=24.10.0",
     "pytest>=8.0",
     "ruff>=0.8.0",
 ]
@@ -54,10 +55,28 @@ where = ["src"]
 "bespokelabs.sandbox" = ["pricing.json"]
 
 [tool.ruff]
-line-length = 120
+line-length = 80
+
+[tool.pyink]
+line-length = 80
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "B", "C4"]
+select = ["E", "W", "F", "I", "B", "C4", "D", "PLW1510", "PLW2901"]
+# Pyink enforces the 80-column target where wrapping is safe. The Google guide
+# permits exceptions for imports, URLs, and other content that cannot be split.
+ignore = [
+    "D101",  # Public classes need docstrings only when their use is non-obvious.
+    "D102",  # Public methods need docstrings only when their use is non-obvious.
+    "D103",  # Public functions need docstrings only when their use is non-obvious.
+    "D105",  # Magic methods usually inherit the class contract.
+    "D107",  # Constructors usually document arguments on the class.
+    "D203",  # Google style has no blank line before class docstrings.
+    "D213",  # Google style starts summaries on the opening line.
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D100", "D104"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

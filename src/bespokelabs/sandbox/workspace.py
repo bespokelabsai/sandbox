@@ -27,7 +27,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from bespokelabs.sandbox.exceptions import SandboxConfigurationError, SandboxError, WorkspaceError
+from bespokelabs.sandbox.exceptions import (
+    SandboxConfigurationError,
+    SandboxError,
+    WorkspaceError,
+)
 
 if TYPE_CHECKING:
     from bespokelabs.sandbox.sandbox import Sandbox
@@ -41,7 +45,9 @@ class WorkspaceEntry:
     sandbox and *dest*, the entry's key in the :class:`Manifest`.
     """
 
-    def materialize(self, sb: Sandbox, dest: str) -> None:  # pragma: no cover - interface
+    def materialize(
+        self, sb: Sandbox, dest: str
+    ) -> None:  # pragma: no cover - interface
         raise NotImplementedError
 
 
@@ -78,7 +84,9 @@ class LocalFile(WorkspaceEntry):
         # upload_file is bytes-only on several backends (it does not chmod), so
         # re-apply the executable bit ourselves to honor the documented contract.
         if src.stat().st_mode & 0o111:
-            result = sb.execute_command("sh", ["-c", f"chmod +x {shlex.quote(dest)}"])
+            result = sb.execute_command(
+                "sh", ["-c", f"chmod +x {shlex.quote(dest)}"]
+            )
             if result.exit_code != 0:
                 raise WorkspaceError(
                     f"failed to set executable bit on {dest!r} (exit {result.exit_code})",
@@ -156,7 +164,9 @@ class Manifest:
     def __post_init__(self) -> None:
         for dest, entry in self.entries.items():
             if not isinstance(dest, str) or not dest.strip():
-                raise SandboxConfigurationError(f"Manifest destination must be a non-empty string, got {dest!r}")
+                raise SandboxConfigurationError(
+                    f"Manifest destination must be a non-empty string, got {dest!r}"
+                )
             if not isinstance(entry, WorkspaceEntry):
                 raise SandboxConfigurationError(
                     f"Manifest entry for {dest!r} must be a WorkspaceEntry, got {type(entry).__name__}"

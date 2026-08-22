@@ -32,9 +32,15 @@ class _RecordingSandbox:
         self.calls: list[tuple] = []
         self._exit_code = exit_code
 
-    def execute_command(self, command: str, args: list[str] | None = None) -> SandboxResult:
+    def execute_command(
+        self, command: str, args: list[str] | None = None
+    ) -> SandboxResult:
         self.calls.append(("exec", command, args))
-        return SandboxResult(stdout="", stderr="boom" if self._exit_code else "", exit_code=self._exit_code)
+        return SandboxResult(
+            stdout="",
+            stderr="boom" if self._exit_code else "",
+            exit_code=self._exit_code,
+        )
 
     def write_file(self, path: str, content: bytes | str) -> None:
         self.calls.append(("write", path, content))
@@ -58,6 +64,7 @@ def _tree(root: Path) -> Path:
 
 
 class ManifestValidationTests(unittest.TestCase):
+
     def test_rejects_non_entry_value(self) -> None:
         with self.assertRaises(SandboxConfigurationError):
             Manifest(entries={"x": "not-an-entry"})  # type: ignore[dict-item]
@@ -68,6 +75,7 @@ class ManifestValidationTests(unittest.TestCase):
 
 
 class EntryUnitTests(unittest.TestCase):
+
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
@@ -95,7 +103,12 @@ class EntryUnitTests(unittest.TestCase):
         LocalFile(p).materialize(sb, "bin/run.sh")
         self.assertEqual(sb.calls[0], ("upload_file", str(p), "bin/run.sh"))
         self.assertTrue(
-            any(c[0] == "exec" and "chmod +x" in c[2][1] and "bin/run.sh" in c[2][1] for c in sb.calls),
+            any(
+                c[0] == "exec"
+                and "chmod +x" in c[2][1]
+                and "bin/run.sh" in c[2][1]
+                for c in sb.calls
+            ),
             sb.calls,
         )
 
@@ -109,7 +122,9 @@ class EntryUnitTests(unittest.TestCase):
 
     def test_local_file_missing_raises_config_error(self) -> None:
         with self.assertRaises(SandboxConfigurationError):
-            LocalFile(self.root / "nope.txt").materialize(_RecordingSandbox(), "d")
+            LocalFile(self.root / "nope.txt").materialize(
+                _RecordingSandbox(), "d"
+            )
 
     def test_local_dir_uploads_with_method(self) -> None:
         d = _tree(self.root)
@@ -133,7 +148,10 @@ class EntryUnitTests(unittest.TestCase):
     def test_git_repo_without_depth_or_ref(self) -> None:
         sb = _RecordingSandbox()
         GitRepo("https://x/y", depth=None).materialize(sb, "repo")
-        self.assertEqual(sb.calls[0][2][1], 'mkdir -p "$(dirname repo)" && git clone https://x/y repo')
+        self.assertEqual(
+            sb.calls[0][2][1],
+            'mkdir -p "$(dirname repo)" && git clone https://x/y repo',
+        )
 
     def test_git_repo_creates_nested_parent_dir(self) -> None:
         sb = _RecordingSandbox()
@@ -153,6 +171,7 @@ class EntryUnitTests(unittest.TestCase):
 
 
 class ManifestApplyTests(unittest.TestCase):
+
     def test_apply_returns_count_and_records_in_order(self) -> None:
         sb = _RecordingSandbox()
         n = Manifest(entries={"a.txt": File("1"), "b.txt": File("2")}).apply(sb)
@@ -161,6 +180,7 @@ class ManifestApplyTests(unittest.TestCase):
 
     def test_wraps_unexpected_error_as_workspace_error(self) -> None:
         class Boom(WorkspaceEntry):
+
             def materialize(self, sb, dest):
                 raise RuntimeError("kaboom")
 
@@ -182,47 +202,60 @@ class ManifestIntegrationTests(unittest.TestCase):
         d = _tree(self.root)
         solo = self.root / "solo.txt"
         solo.write_text("SOLO")
-        manifest = Manifest(entries={
-            "config.json": File('{"k": 1}'),
-            "seed/solo.txt": LocalFile(solo),
-            "skills/d": LocalDir(d),
-        })
+        manifest = Manifest(
+            entries={
+                "config.json": File('{"k": 1}'),
+                "seed/solo.txt": LocalFile(solo),
+                "skills/d": LocalDir(d),
+            }
+        )
         with Sandbox("local", workspace=manifest) as sb:
             self.assertEqual(sb.read_file("config.json").decode(), '{"k": 1}')
             self.assertEqual(sb.read_file("seed/solo.txt").decode(), "SOLO")
             self.assertEqual(sb.read_file("skills/d/a.txt").decode(), "AAA")
-            xbit = sb.execute_command("sh", ["-c", "test -x skills/d/run.sh && echo yes || echo no"])
+            xbit = sb.execute_command(
+                "sh", ["-c", "test -x skills/d/run.sh && echo yes || echo no"]
+            )
             self.assertEqual(xbit.stdout.strip(), "yes")
 
     def test_later_entry_overlays_earlier(self) -> None:
         d = _tree(self.root)  # d/a.txt == "AAA"
-        manifest = Manifest(entries={
-            "x": LocalDir(d),
-            "x/a.txt": File("BBB"),  # overwrites the dir's a.txt
-        })
+        manifest = Manifest(
+            entries={
+                "x": LocalDir(d),
+                "x/a.txt": File("BBB"),  # overwrites the dir's a.txt
+            }
+        )
         with Sandbox("local", workspace=manifest) as sb:
             self.assertEqual(sb.read_file("x/a.txt").decode(), "BBB")
 
     def test_workspace_overlays_files_kwarg(self) -> None:
         # files= is written first, then the workspace manifest overlays it.
         manifest = Manifest(entries={"c.txt": File("from-workspace")})
-        with Sandbox("local", files={"c.txt": "from-files"}, workspace=manifest) as sb:
+        with Sandbox(
+            "local", files={"c.txt": "from-files"}, workspace=manifest
+        ) as sb:
             self.assertEqual(sb.read_file("c.txt").decode(), "from-workspace")
 
     def test_bad_entry_aborts_creation(self) -> None:
-        manifest = Manifest(entries={"x": LocalDir(self.root / "does-not-exist")})
+        manifest = Manifest(
+            entries={"x": LocalDir(self.root / "does-not-exist")}
+        )
         with self.assertRaises(SandboxConfigurationError):
             Sandbox("local", workspace=manifest)
 
     def test_custom_entry_subclass(self) -> None:
         class Upper(WorkspaceEntry):
+
             def __init__(self, text: str) -> None:
                 self.text = text
 
             def materialize(self, sb, dest):
                 sb.write_file(dest, self.text.upper())
 
-        with Sandbox("local", workspace=Manifest(entries={"u.txt": Upper("hi")})) as sb:
+        with Sandbox(
+            "local", workspace=Manifest(entries={"u.txt": Upper("hi")})
+        ) as sb:
             self.assertEqual(sb.read_file("u.txt").decode(), "HI")
 
     def test_apply_to_live_sandbox(self) -> None:
@@ -240,16 +273,26 @@ class ManifestIntegrationTests(unittest.TestCase):
         (origin / "hello.txt").write_text("hi")
         env = {
             **os.environ,
-            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
         }
         subprocess.run(["git", "init", "-q"], cwd=origin, check=True, env=env)
         subprocess.run(["git", "add", "."], cwd=origin, check=True, env=env)
-        subprocess.run(["git", "commit", "-qm", "init"], cwd=origin, check=True, env=env)
+        subprocess.run(
+            ["git", "commit", "-qm", "init"], cwd=origin, check=True, env=env
+        )
 
-        manifest = Manifest(entries={"work/nested/repo": GitRepo(f"file://{origin}", depth=None)})
+        manifest = Manifest(
+            entries={
+                "work/nested/repo": GitRepo(f"file://{origin}", depth=None)
+            }
+        )
         with Sandbox("local", workspace=manifest) as sb:
-            self.assertEqual(sb.read_file("work/nested/repo/hello.txt").decode(), "hi")
+            self.assertEqual(
+                sb.read_file("work/nested/repo/hello.txt").decode(), "hi"
+            )
 
 
 if __name__ == "__main__":

@@ -1,5 +1,4 @@
-"""
-Summarize a GitHub repository using an agent inside a cloud sandbox.
+"""Summarize a GitHub repository using an agent inside a cloud sandbox.
 
 This example keeps the four agent placement patterns separate so each one is
 easy to read:
@@ -84,13 +83,15 @@ def claude_code_with_git_repo(backend: str, repo: str) -> SandboxResult:
         git_repo=repo,
         env_vars=env_vars,
     ) as sb:
-        agent = sb.agent(AgentSpec.inside(
-            name="claude",
-            command=_claude_command(web=False),
-            cwd=repo_name,
-            env=env_vars,
-            input_mode="argv",
-        ))
+        agent = sb.agent(
+            AgentSpec.inside(
+                name="claude",
+                command=_claude_command(web=False),
+                cwd=repo_name,
+                env=env_vars,
+                input_mode="argv",
+            )
+        )
 
         print(
             f"Running Claude Code inside {backend_name} on cloned {repo_name} repo...",
@@ -110,12 +111,14 @@ def claude_code_without_git_repo(backend: str, repo: str) -> SandboxResult:
         preset="claude-code",
         env_vars=env_vars,
     ) as sb:
-        agent = sb.agent(AgentSpec.inside(
-            name="claude",
-            command=_claude_command(web=True),
-            env=env_vars,
-            input_mode="argv",
-        ))
+        agent = sb.agent(
+            AgentSpec.inside(
+                name="claude",
+                command=_claude_command(web=True),
+                env=env_vars,
+                input_mode="argv",
+            )
+        )
 
         print(
             f"Running Claude Code inside {backend_name} to summarize {repo}...",
@@ -140,13 +143,15 @@ def codex_with_git_repo(backend: str, repo: str) -> SandboxResult:
         git_repo=repo,
         env_vars=env_vars,
     ) as sb:
-        agent = sb.agent(AgentSpec.inside(
-            name="codex",
-            command=_codex_command(search=False),
-            cwd=repo_name,
-            env=env_vars,
-            input_mode="argv",
-        ))
+        agent = sb.agent(
+            AgentSpec.inside(
+                name="codex",
+                command=_codex_command(search=False),
+                cwd=repo_name,
+                env=env_vars,
+                input_mode="argv",
+            )
+        )
 
         print(
             f"Running Codex inside {backend_name} on cloned {repo_name} repo...",
@@ -166,12 +171,14 @@ def codex_without_git_repo(backend: str, repo: str) -> SandboxResult:
         preset="codex",
         env_vars=env_vars,
     ) as sb:
-        agent = sb.agent(AgentSpec.inside(
-            name="codex",
-            command=_codex_command(search=True),
-            env=env_vars,
-            input_mode="argv",
-        ))
+        agent = sb.agent(
+            AgentSpec.inside(
+                name="codex",
+                command=_codex_command(search=True),
+                env=env_vars,
+                input_mode="argv",
+            )
+        )
 
         print(
             f"Running Codex inside {backend_name} to summarize {repo}...",
@@ -199,11 +206,13 @@ def _web_prompt(repo: str) -> str:
 def _claude_command(*, web: bool) -> list[str]:
     command = ["claude", "-p", "--permission-mode", "dontAsk"]
     if web:
-        command.extend([
-            "--allowedTools",
-            "WebFetch(domain:github.com)",
-            "WebSearch",
-        ])
+        command.extend(
+            [
+                "--allowedTools",
+                "WebFetch(domain:github.com)",
+                "WebSearch",
+            ]
+        )
     command.append("--")
     return command
 
@@ -212,15 +221,23 @@ def _codex_command(*, search: bool) -> list[str]:
     command = ["codex"]
     if search:
         command.append("--search")
-    command.extend([
-        "exec",
-        "--skip-git-repo-check",
-        "--sandbox",
-        "read-only",
-        "--ignore-user-config",
-        "--ignore-rules",
-    ])
-    return ["bash", "-c", _CODEX_FINAL_OUTPUT_SCRIPT, "codex-final-output", *command]
+    command.extend(
+        [
+            "exec",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+            "--ignore-user-config",
+            "--ignore-rules",
+        ]
+    )
+    return [
+        "bash",
+        "-c",
+        _CODEX_FINAL_OUTPUT_SCRIPT,
+        "codex-final-output",
+        *command,
+    ]
 
 
 def _backend_label(backend: str) -> str:
@@ -239,8 +256,9 @@ def _require_env(name: str) -> dict[str, str]:
 
 
 def _codex_api_key() -> str:
-    api_key = os.environ.get(
-        "CODEX_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+    api_key = os.environ.get("CODEX_API_KEY") or os.environ.get(
+        "OPENAI_API_KEY", ""
+    )
     if not api_key:
         sys.exit("Error: CODEX_API_KEY or OPENAI_API_KEY is not set.")
     return api_key
@@ -248,12 +266,15 @@ def _codex_api_key() -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Summarize a repository with an agent in a cloud sandbox")
+        description="Summarize a repository with an agent in a cloud sandbox"
+    )
     parser.add_argument("--backend", choices=BACKENDS, default="daytona")
     parser.add_argument(
-        "--agent", choices=["claude-code", "codex"], default="claude-code")
+        "--agent", choices=["claude-code", "codex"], default="claude-code"
+    )
     parser.add_argument(
-        "--mode", choices=["git_repo", "web"], default="git_repo")
+        "--mode", choices=["git_repo", "web"], default="git_repo"
+    )
     parser.add_argument("--repo", default=DEFAULT_REPO)
     args = parser.parse_args()
 

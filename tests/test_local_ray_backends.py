@@ -8,11 +8,13 @@ from bespokelabs.sandbox import Sandbox
 
 
 class _FakeObjectRef:
+
     def __init__(self, value: object) -> None:
         self.value = value
 
 
 class _FakeRemoteMethod:
+
     def __init__(self, method: object) -> None:
         self._method = method
 
@@ -21,6 +23,7 @@ class _FakeRemoteMethod:
 
 
 class _FakeActorHandle:
+
     def __init__(self, instance: object) -> None:
         self._instance = instance
 
@@ -29,11 +32,14 @@ class _FakeActorHandle:
 
 
 class _FakeRemoteActorClass:
+
     def __init__(self, cls: type, fake_ray: "_FakeRayModule") -> None:
         self._cls = cls
         self._fake_ray = fake_ray
 
-    def options(self, *, num_cpus: float | None = None) -> "_FakeRemoteActorClass":
+    def options(
+        self, *, num_cpus: float | None = None
+    ) -> "_FakeRemoteActorClass":
         self._fake_ray.last_actor_num_cpus = num_cpus
         return self
 
@@ -42,6 +48,7 @@ class _FakeRemoteActorClass:
 
 
 class _FakeRayModule(types.SimpleNamespace):
+
     def __init__(self) -> None:
         super().__init__()
         self._initialized = False
@@ -65,6 +72,7 @@ class _FakeRayModule(types.SimpleNamespace):
 
 
 class LocalBackendTests(unittest.TestCase):
+
     def test_execute_code_falls_back_to_python3(self) -> None:
         sb = Sandbox("local")
         self.addCleanup(sb.destroy)
@@ -74,14 +82,18 @@ class LocalBackendTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(result.stdout.strip(), "hello")
 
-    def test_absolute_paths_are_consistent_across_helpers_and_execution(self) -> None:
+    def test_absolute_paths_are_consistent_across_helpers_and_execution(
+        self,
+    ) -> None:
         sb = Sandbox("local")
         self.addCleanup(sb.destroy)
 
         sb.write_file("/hello.txt", "hi")
 
         code_result = sb.execute_code("print(open('/hello.txt').read())")
-        command_result = sb.execute_command("sh", ["-c", "echo shell >/hello2.txt"])
+        command_result = sb.execute_command(
+            "sh", ["-c", "echo shell >/hello2.txt"]
+        )
 
         self.assertEqual(code_result.exit_code, 0)
         self.assertEqual(code_result.stdout.strip(), "hi")
@@ -90,6 +102,7 @@ class LocalBackendTests(unittest.TestCase):
 
 
 class RayBackendTests(unittest.TestCase):
+
     def setUp(self) -> None:
         self.fake_ray = _FakeRayModule()
         self.patch = mock.patch.dict("sys.modules", {"ray": self.fake_ray})
@@ -111,14 +124,18 @@ class RayBackendTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(result.stdout.strip(), "hello")
 
-    def test_absolute_paths_are_consistent_across_helpers_and_execution(self) -> None:
+    def test_absolute_paths_are_consistent_across_helpers_and_execution(
+        self,
+    ) -> None:
         sb = Sandbox("ray")
         self.addCleanup(sb.destroy)
 
         sb.write_file("/hello.txt", "hi")
 
         code_result = sb.execute_code("print(open('/hello.txt').read())")
-        command_result = sb.execute_command("sh", ["-c", "echo shell >/hello2.txt"])
+        command_result = sb.execute_command(
+            "sh", ["-c", "echo shell >/hello2.txt"]
+        )
 
         self.assertEqual(code_result.exit_code, 0)
         self.assertEqual(code_result.stdout.strip(), "hi")
