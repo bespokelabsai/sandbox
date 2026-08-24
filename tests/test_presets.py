@@ -101,8 +101,9 @@ class PresetImageResolutionTests(unittest.TestCase):
     """Verify how presets resolve the image field.
 
     These tests also decide whether to run setup_commands. They cover the
-    OCI-vs-tensorlake split: preset.image targets docker/daytona/modal, while
-    preset.tensorlake_image targets tensorlake.
+    OCI-vs-provider split: preset.image targets docker/daytona/modal, while
+    preset.tensorlake_image targets tensorlake and RunPod uses an SSH-ready
+    base image.
     """
 
     PRESET_NAME = "_test_dual_image"
@@ -143,6 +144,7 @@ class PresetImageResolutionTests(unittest.TestCase):
             "bespokelabs.sandbox.backends.BACKENDS",
             {
                 "docker": lambda: _make_backend_client(),
+                "runpod": lambda: _make_backend_client(),
                 "tensorlake": lambda: _make_backend_client(),
             },
             clear=False,
@@ -175,6 +177,12 @@ class PresetImageResolutionTests(unittest.TestCase):
         sb._session.execute_command.assert_called_once_with(
             f"{TENSORLAKE_NPM_PREFIX} @anthropic-ai/claude-code"
         )
+
+    def test_runpod_uses_ssh_ready_default_image_and_runs_setup(self) -> None:
+        sb = Sandbox(backend="runpod", preset=self.PRESET_NAME)
+
+        self.assertIsNone(sb._config.image)
+        sb._session.execute_command.assert_called_once_with("echo hi")
 
     def test_backend_only_setup_commands_run(self) -> None:
         sb = Sandbox(backend="tensorlake", preset=self.BACKEND_ONLY_PRESET_NAME)

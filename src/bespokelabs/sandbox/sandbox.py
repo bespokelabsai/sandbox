@@ -62,7 +62,7 @@ class Sandbox:
     """A live sandbox session with a unified interface across backends.
 
     Supported backends are Local, Safehouse, Docker, Ray, Daytona, Tensorlake,
-    Modal, and E2B.
+    Modal, RunPod, and E2B.
 
     Usage:
         with Sandbox("safehouse", timeout_secs=300) as sb:
@@ -124,15 +124,16 @@ class Sandbox:
             resolved_preset = preset
 
         # Pick the preset image for this backend: tensorlake uses a
-        # project-scoped name (tensorlake_image), everything else uses
-        # the OCI `image` field.
+        # project-scoped name (tensorlake_image), while RunPod uses its
+        # SSH-ready default image and runs the preset setup commands there.
+        # The ordinary preset OCI images do not run an SSH daemon. Everything
+        # else uses the OCI `image` field.
         preset_image_for_backend = None
         if resolved_preset:
-            preset_image_for_backend = (
-                resolved_preset.tensorlake_image
-                if backend == "tensorlake"
-                else resolved_preset.image
-            )
+            if backend == "tensorlake":
+                preset_image_for_backend = resolved_preset.tensorlake_image
+            elif backend != "runpod":
+                preset_image_for_backend = resolved_preset.image
 
         # Merge: explicit kwargs override preset defaults.  Without a
         # preset, an empty SandboxPreset supplies the standard defaults.
@@ -466,6 +467,12 @@ class Sandbox:
 
     def _compute_cost(self, elapsed_secs: float) -> float:
         """Estimate sandbox compute cost for an interval of *elapsed_secs*."""
+        # GPU Pod pricing is selected dynamically from live capacity. Backends
+        # that expose the actual hourly rate take precedence over the static
+        # CPU/RAM estimates bundled with this package.
+        hourly_rate = getattr(self._session, "cost_per_hour", None)
+        if isinstance(hourly_rate, (int, float)):
+            return hourly_rate / 3600 * elapsed_secs
         cost_per_sec = pricing.cost_per_second(
             self._config.backend,
             vcpu=self._config.cpu,

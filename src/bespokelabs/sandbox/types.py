@@ -11,12 +11,15 @@ class SandboxConfig:
     """Normalized configuration passed to every backend adapter.
 
     Not all backends honour every field:
-      - cpu / memory_mb: Daytona, Tensorlake, Modal, Docker
-      - gpu: Modal only (e.g. ``"L4"``, ``"A100"``, or ``"H100:2"``)
-      - disk_mb: Daytona only (image-based sandboxes)
-      - image: Modal, Daytona (OCI image), Docker (e.g. "python:3.12-slim"),
+      - cpu / memory_mb: Daytona, Tensorlake, Modal, Docker, RunPod
+      - gpu: Modal (e.g. ``"L4"`` or ``"H100:2"``), RunPod (exact GPU
+        type ID, optionally followed by a count, e.g.
+        ``"NVIDIA H100 80GB HBM3:2"``)
+      - disk_mb: Daytona and RunPod (container disk)
+      - image: Modal, Daytona, RunPod (OCI image), Docker
+               (e.g. "python:3.12-slim"),
                Tensorlake (project-scoped image name, e.g. "tensorlake/ubuntu-minimal")
-      - template: E2B only
+      - template: E2B and RunPod
       - app_name: Modal only
       - allow_internet: Tensorlake, Daytona, Docker
       - snapshot_id: Tensorlake, Modal
@@ -28,12 +31,13 @@ class SandboxConfig:
         timeout_secs becomes ttl_minutes -- a hard wall-clock destroy -- and a
         value nobody asked for must not silently cap a sandbox's lifetime.
       - workdir: Local, Safehouse (host directory used as the sandbox root),
-                 Tensorlake, Daytona (command working directory; Tensorlake
-                 defaults to /tmp)
+                 Tensorlake, Daytona, RunPod (command working directory;
+                 Tensorlake defaults to /tmp, RunPod to /workspace)
       - backend_options: provider-specific escape hatch, merged last into the
         backend's underlying create call (Docker containers.run, Modal
         Sandbox.create, E2B Sandbox.create, Tensorlake create_and_connect,
-        Daytona create params). Ignored by local/safehouse/ray.
+        Daytona create params, RunPod REST create payload). Ignored by
+        local/safehouse/ray.
     """
 
     backend: str

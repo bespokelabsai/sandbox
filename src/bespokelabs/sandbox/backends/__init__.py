@@ -8,6 +8,7 @@ from bespokelabs.sandbox.backends.e2b import E2BClient
 from bespokelabs.sandbox.backends.local import LocalClient
 from bespokelabs.sandbox.backends.modal import ModalClient
 from bespokelabs.sandbox.backends.ray import RayClient
+from bespokelabs.sandbox.backends.runpod import RunpodClient
 from bespokelabs.sandbox.backends.safehouse import SafehouseClient
 from bespokelabs.sandbox.backends.tensorlake import TensorlakeClient
 
@@ -22,5 +23,6 @@ BACKENDS: dict[str, type] = {
     "docker": DockerClient,
     "local": LocalClient,
     "ray": RayClient,
+    "runpod": RunpodClient,
     "safehouse": SafehouseClient,
 }
