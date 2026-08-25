@@ -38,7 +38,9 @@ pip install bespokelabs-sandbox[ray]
 pip install bespokelabs-sandbox[all]
 ```
 
-The Safehouse backend has no Python extra. Install the CLI separately on macOS:
+The RunPod backend has no Python extra; it uses the system OpenSSH client.
+The Safehouse backend also has no Python extra. Install its CLI separately on
+macOS:
 
 ```bash
 brew install eugene1g/safehouse/agent-safehouse
@@ -64,6 +66,7 @@ No API keys, no cloud accounts. Just works.
 | [Daytona](https://www.daytona.io) | `[daytona]` | `DAYTONA_API_KEY` |
 | [Tensorlake](https://tensorlake.ai) | `[tensorlake]` | `tl login` |
 | [Modal](https://modal.com) | `[modal]` | `MODAL_TOKEN_ID` + `MODAL_TOKEN_SECRET` |
+| [RunPod](https://www.runpod.io) | _(none)_ | `RUNPOD_API_KEY` + registered SSH key |
 | [E2B](https://e2b.dev) | `[e2b]` | `E2B_API_KEY` |
 
 You only need to install the backend you use. The others are lazily imported.
@@ -97,8 +100,12 @@ with Sandbox("e2b") as sb:
 Switch backends by changing one string:
 
 ```python
-for backend in ["local", "safehouse", "docker", "modal", "e2b", "daytona", "tensorlake", "ray"]:
-    with Sandbox(backend) as sb:
+for backend in [
+    "local", "safehouse", "docker", "modal", "runpod",
+    "e2b", "daytona", "tensorlake", "ray",
+]:
+    options = {"gpu": "NVIDIA L4"} if backend == "runpod" else {}
+    with Sandbox(backend, **options) as sb:
         sb.execute_code('print("same code, any backend")')
 ```
 
@@ -110,21 +117,21 @@ for backend in ["local", "safehouse", "docker", "modal", "e2b", "daytona", "tens
 from bespokelabs.sandbox import Sandbox
 
 sb = Sandbox(
-    backend,              # "local" | "safehouse" | "docker" | "ray" | "daytona" | "tensorlake" | "modal" | "e2b"
+    backend,              # "local" | "safehouse" | "docker" | "ray" | "daytona" | "tensorlake" | "modal" | "runpod" | "e2b"
     *,
     preset=None,          # Preset name or SandboxPreset object
-    cpu=1.0,              # vCPUs (Tensorlake, Modal, Docker, Daytona)
-    memory_mb=1024,       # RAM in MB (Tensorlake, Modal, Docker, Daytona)
-    disk_mb=None,         # Disk in MB (Daytona)
-    gpu=None,             # GPU type/count (Modal, e.g. "L4" or "H100:2")
+    cpu=1.0,              # vCPUs (Tensorlake, Modal, Docker, Daytona, RunPod)
+    memory_mb=1024,       # RAM in MB (Tensorlake, Modal, Docker, Daytona, RunPod)
+    disk_mb=None,         # Disk in MB (Daytona, RunPod)
+    gpu=None,             # GPU type/count (Modal, RunPod)
     timeout_secs=600,     # Max lifetime / subprocess timeout
-    image=None,           # Container image (Docker, Modal, Daytona)
-    template=None,        # Template ID (E2B)
+    image=None,           # Container image (Docker, Modal, Daytona, RunPod)
+    template=None,        # Template ID (E2B, RunPod)
     env_vars=None,        # dict of environment variables
     allow_internet=True,  # Network access (Docker, Tensorlake, Daytona)
     app_name=None,        # App name (Modal)
     snapshot_id=None,     # Restore from snapshot (Tensorlake, Modal)
-    workdir=None,         # Sandbox root (Safehouse) / command working dir (Tensorlake, Daytona)
+    workdir=None,         # Sandbox root or command working directory
     backend_options=None, # dict merged into the backend's native create call
     files=None,           # {path: bytes|str} written into the sandbox on create
     git_repo=None,        # repo URL cloned into the sandbox on create
@@ -133,7 +140,9 @@ sb = Sandbox(
 )
 ```
 
-Not every backend uses every parameter. Unsupported params are silently ignored.
+Not every backend uses every parameter. Most unsupported parameters are
+ignored; a backend rejects values it cannot safely honor, such as network
+isolation on RunPod.
 
 Modal GPU sandboxes accept Modal's GPU reservation strings, including a GPU
 type such as `gpu="L4"` or a type and count such as `gpu="H100:2"`:
@@ -146,8 +155,30 @@ with Sandbox("modal", gpu="A100") as sb:
 
 GPU sandboxes can be preempted, so GPU workloads should tolerate interruption.
 
-`timeout_secs` is a subprocess timeout on Local and Ray, a sandbox timeout on
-E2B and Modal, and on Daytona a wall-clock `ttl_minutes` deadline. Daytona
+RunPod uses exact GPU type IDs and requires a GPU selection. Its official
+PyTorch image is used by default because it includes SSH support:
+
+```python
+with Sandbox(
+    "runpod",
+    gpu="NVIDIA H100 80GB HBM3:2",
+    backend_options={"ssh_private_key_path": "~/.ssh/id_ed25519"},
+) as sb:
+    result = sb.execute_command("nvidia-smi")
+    print(result.stdout)
+```
+
+For capacity fallback, pass RunPod's native creation fields through
+`backend_options`, such as a `gpuTypeIds` list containing `"NVIDIA L40S"` and
+`"NVIDIA RTX A6000"`, with `gpuTypePriority="availability"`. Custom images and
+templates must run an SSH daemon on port 22. Add the matching public key to the
+RunPod account before creating a sandbox. `ssh_private_key_path` is optional
+when the key is already discoverable by OpenSSH.
+
+`timeout_secs` is a command timeout on Local, Ray, and RunPod; a sandbox
+timeout on E2B and Modal; and on Daytona a wall-clock `ttl_minutes` deadline.
+RunPod creation has a separate 10-minute default readiness timeout, adjustable
+with `backend_options={"create_timeout_secs": ...}`. Daytona
 destroys the sandbox when that deadline elapses in whatever state it is in,
 running work included; no activity resets the clock, and the clock starts at
 creation, so image pull and boot count against it. The mapping happens only
@@ -412,7 +443,12 @@ with Sandbox("docker", preset="codex", image="my-registry/codex-tools:v3") as sb
     sb.execute_command("codex --version")
 ```
 
-The Dockerfiles live under `images/<preset>/`. Local, Safehouse, Ray, and other backends that cannot use the prebuilt image still fall back to the preset setup commands. Tensorlake image names are project-scoped, so you can build/register equivalent images from the same Dockerfiles when you need Tensorlake-specific preset images.
+The Dockerfiles live under `images/<preset>/`. Local, Safehouse, Ray, and other
+backends that cannot use the prebuilt image still fall back to the preset setup
+commands. RunPod deliberately does this on its SSH-ready default image.
+Tensorlake image names are project-scoped, so you can build/register equivalent
+images from the same Dockerfiles when you need Tensorlake-specific preset
+images.
 
 ```python
 # Sandbox with Codex CLI installed
@@ -553,8 +589,8 @@ with Sandbox(
 native creation call, so you can reach provider features the unified API
 doesn't model — without waiting for a new keyword. It is forwarded to Docker
 `containers.run`, Modal `Sandbox.create`, E2B `Sandbox.create`, Tensorlake
-`create_and_connect`, and Daytona's create params; ignored by local, safehouse,
-and ray.
+`create_and_connect`, Daytona's create params, and the RunPod REST creation
+payload; ignored by local, safehouse, and ray.
 
 ```python
 # e.g. set the container hostname (a Docker-only knob)
@@ -566,6 +602,12 @@ On Daytona, `env_vars` given here is merged over the `env_vars=` parameter
 rather than replacing it, and `create_timeout` (seconds) is consumed by the SDK
 adapter to bound the create call itself instead of being passed as a sandbox
 parameter.
+
+On RunPod, transport-only options are consumed by the adapter rather than sent
+to the REST API: `create_timeout_secs`, `api_timeout_secs`,
+`poll_interval_secs`, `ssh_private_key_path`, `ssh_user`,
+`ssh_connect_timeout_secs`, `ssh_strict_host_key_checking`, and
+`ssh_known_hosts_file`. Other keys use RunPod's native camelCase field names.
 
 ### Session state (resume)
 
@@ -599,6 +641,7 @@ materialization are skipped.
 | Modal | sandbox id (`Sandbox.from_id`) | `sandbox_id` |
 | Tensorlake | sandbox id (`client.connect`) | `sandbox_id` |
 | Daytona | sandbox id (`client.get`) | `sandbox_id`, `workdir` (when set) |
+| RunPod | Pod id (`GET /pods/{id}`) | `pod_id`, workdir and SSH transport settings |
 | Local, Safehouse | host workdir | `workdir`, env overlay |
 | Ray | — (not supported) | raises `FeatureNotSupportedError` |
 
@@ -617,7 +660,7 @@ sb2 = Sandbox("tensorlake", snapshot_id=snap.snapshot_id)
 | Docker | Yes (`container.commit()`) |
 | Tensorlake | Yes (filesystem + memory) |
 | Modal | Yes (filesystem) |
-| Daytona, E2B, Local, Ray, Safehouse | No |
+| Daytona, E2B, Local, Ray, RunPod, Safehouse | No |
 
 ### Lifecycle
 
@@ -690,21 +733,21 @@ rather than at `AsyncSandboxClient(...)` construction, which does no I/O.
 
 ## Feature Support Matrix
 
-| Feature | Local | Safehouse | Docker | Ray | Daytona | Tensorlake | Modal | E2B |
-|---|---|---|---|---|---|---|---|---|
-| `execute_code` | Any binary | Any binary | Any binary | Any binary | Python, TS, JS, Ruby, Go | Any binary | Any binary | Python |
-| `execute_command` | Shell | Shell | Shell | Shell | Shell | Shell | Shell | Shell |
-| `list_files` | Native | Native | `find` / `ls` | Native | Native SDK | via `ls` | Native SDK | Native SDK |
-| `read_file` | Native | Native | `get_archive` | Native | Native SDK | via `cat` | Native SDK | Native SDK |
-| `write_file` | Native | Native | `put_archive` | Native | Native SDK | via base64 | Native SDK | Native SDK |
-| `upload_file` | `shutil.copy` | `shutil.copy` | `put_archive` | `ray.put` | Native SDK | via base64 | Native SDK | Native SDK |
-| `download_file` | `shutil.copy` | `shutil.copy` | `get_archive` | `ray.get` | Native SDK | via base64 | Native SDK | Native SDK |
-| `snapshot` | No | No | Yes | No | No | Yes | Yes | No |
-| Resource limits | No | No | cpu, memory | cpu (Ray) | cpu, memory, disk | cpu, memory | cpu, memory, gpu | Tier-based |
-| Network control | No | No | Yes | No | Firewall, VPN | Yes | Tunnels | No |
-| Isolation | Process-level | macOS `sandbox-exec` | Container | Process | Full VM | Container | Container | Full VM |
-| GPU | No | No | No | Via Ray | No | No | Yes | No |
-| Needs install | Nothing | `safehouse` CLI | Docker daemon | `ray` | API key | `tl login` | API key | API key |
+| Feature | Local | Safehouse | Docker | Ray | Daytona | Tensorlake | Modal | RunPod | E2B |
+|---|---|---|---|---|---|---|---|---|---|
+| `execute_code` | Any binary | Any binary | Any binary | Any binary | Python, TS, JS, Ruby, Go | Any binary | Any binary | Any binary | Python |
+| `execute_command` | Shell | Shell | Shell | Shell | Shell | Shell | Shell | SSH | Shell |
+| `list_files` | Native | Native | `find` / `ls` | Native | Native SDK | via `ls` | Native SDK | via SSH | Native SDK |
+| `read_file` | Native | Native | `get_archive` | Native | Native SDK | via `cat` | Native SDK | via SSH | Native SDK |
+| `write_file` | Native | Native | `put_archive` | Native | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
+| `upload_file` | `shutil.copy` | `shutil.copy` | `put_archive` | `ray.put` | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
+| `download_file` | `shutil.copy` | `shutil.copy` | `get_archive` | `ray.get` | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
+| `snapshot` | No | No | Yes | No | No | Yes | Yes | No | No |
+| Resource limits | No | No | cpu, memory | cpu (Ray) | cpu, memory, disk | cpu, memory | cpu, memory, gpu | cpu, memory, disk, gpu | Tier-based |
+| Network control | No | No | Yes | No | Firewall, VPN | Yes | Tunnels | No | No |
+| Isolation | Process-level | macOS `sandbox-exec` | Container | Process | Full VM | Container | Container | Container | Full VM |
+| GPU | No | No | No | Via Ray | No | No | Yes | Yes | No |
+| Needs install | Nothing | `safehouse` CLI | Docker daemon | `ray` | API key | `tl login` | API key | API key + OpenSSH | API key |
 
 ## Exceptions
 
@@ -750,6 +793,9 @@ tl login
 # Modal
 export MODAL_TOKEN_ID=your_id
 export MODAL_TOKEN_SECRET=your_secret
+
+# RunPod — add the matching public key to your RunPod account
+export RUNPOD_API_KEY=your_key
 
 # E2B
 export E2B_API_KEY=your_key

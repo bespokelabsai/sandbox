@@ -252,6 +252,14 @@ class RunAgentTests(unittest.TestCase):
         self.assertEqual(sb.usage.output_tokens, 20)
         self.assertAlmostEqual(sb.usage.llm_cost_usd, 0.02)
 
+    def test_live_backend_hourly_rate_overrides_static_pricing(self) -> None:
+        sb, session = self._sandbox(_claude_json())
+        session.cost_per_hour = 3.6
+        try:
+            self.assertAlmostEqual(sb._compute_cost(10), 0.01)
+        finally:
+            sb._destroyed = True
+
     def test_resumed_sandbox_has_usage(self) -> None:
         # _from_session() bypasses __init__, so it must still seed _usage.
         from bespokelabs.sandbox.types import SandboxConfig
