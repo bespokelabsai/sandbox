@@ -262,6 +262,15 @@ class RunpodClient:
         pod = initial_pod
         last_ssh_error = ""
         while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise SandboxTimeoutError(
+                    f"RunPod Pod '{pod_id}' did not become SSH-ready within "
+                    f"{transport['create_timeout_secs']} seconds.",
+                    backend="runpod",
+                    op="create",
+                    context={"desired_status": pod.get("desiredStatus")},
+                )
             endpoint = _ssh_endpoint(pod)
             if endpoint is not None:
                 session = self._make_session(
@@ -272,7 +281,16 @@ class RunpodClient:
                     timeout_secs=config.timeout_secs,
                     transport=transport,
                 )
-                probe = session._run_remote("true")
+                try:
+                    probe = session._run_remote("true", timeout_secs=remaining)
+                except SandboxTimeoutError as exc:
+                    raise SandboxTimeoutError(
+                        f"RunPod Pod '{pod_id}' did not become SSH-ready "
+                        f"within {transport['create_timeout_secs']} seconds.",
+                        backend="runpod",
+                        op="create",
+                        context={"desired_status": pod.get("desiredStatus")},
+                    ) from exc
                 if probe.returncode == 0:
                     return session
                 last_ssh_error = probe.stderr.decode(errors="replace").strip()
@@ -513,14 +531,30 @@ class RunpodSession:
         try:
             self._api.delete_pod(pod_id)
         except _RunpodApiError as exc:
-            if exc.status_code != 404:
+            if exc.status_code == 404:
+                self._pod_id = None
                 return
-        except Exception:
-            return
+            raise SandboxConnectionError(
+                f"Failed to delete RunPod Pod '{pod_id}': {exc}",
+                backend="runpod",
+                op="destroy",
+                context={"pod_id": pod_id},
+            ) from exc
+        except Exception as exc:
+            raise SandboxConnectionError(
+                f"Failed to delete RunPod Pod '{pod_id}': {exc}",
+                backend="runpod",
+                op="destroy",
+                context={"pod_id": pod_id},
+            ) from exc
         self._pod_id = None
 
     def _run_remote(
-        self, remote_command: str, *, input_data: bytes | None = None
+        self,
+        remote_command: str,
+        *,
+        input_data: bytes | None = None,
+        timeout_secs: float | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
         args = [
             self._ssh_path,
@@ -553,17 +587,21 @@ class RunpodSession:
                 remote_command,
             ]
         )
+        effective_timeout = (
+            self._timeout_secs if timeout_secs is None else timeout_secs
+        )
         try:
             return subprocess.run(
                 args,
                 input=input_data,
                 capture_output=True,
                 check=False,
-                timeout=self._timeout_secs,
+                timeout=effective_timeout,
             )
         except subprocess.TimeoutExpired as exc:
             raise SandboxTimeoutError(
-                f"RunPod SSH operation timed out after {self._timeout_secs} seconds",
+                f"RunPod SSH operation timed out after "
+                f"{effective_timeout} seconds",
                 backend="runpod",
                 op="ssh",
             ) from exc

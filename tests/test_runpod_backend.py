@@ -10,6 +10,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest import mock
 
+from bespokelabs.sandbox import Sandbox
 from bespokelabs.sandbox.backends.runpod import (
     RunpodClient,
     RunpodSession,
@@ -20,8 +21,11 @@ from bespokelabs.sandbox.backends.runpod import (
 from bespokelabs.sandbox.exceptions import (
     FeatureNotSupportedError,
     SandboxConfigurationError,
+    SandboxConnectionError,
     SandboxCreationError,
     SandboxExecutionError,
+    SandboxNotFoundError,
+    SandboxTimeoutError,
 )
 from bespokelabs.sandbox.types import SandboxConfig
 
@@ -264,6 +268,55 @@ class RunpodClientTests(unittest.TestCase):
         self.assertIn("31022", ssh_args)
         self.assertIn("/keys/runpod", ssh_args)
 
+    @mock.patch(
+        "bespokelabs.sandbox.backends.runpod.time.monotonic",
+        side_effect=[100.0, 101.0],
+    )
+    @mock.patch(
+        "bespokelabs.sandbox.backends.runpod.subprocess.run",
+        return_value=_completed(),
+    )
+    def test_create_deadline_limits_the_ssh_probe(
+        self, run: mock.Mock, monotonic: mock.Mock
+    ) -> None:
+        del monotonic
+        api = _FakeApi(_ready_pod())
+        client = _client(api)
+        config = SandboxConfig(
+            backend="runpod",
+            gpu="NVIDIA L40S",
+            backend_options={"create_timeout_secs": 5},
+        )
+
+        client.create(config)
+
+        self.assertEqual(run.call_args.kwargs["timeout"], 4.0)
+
+    @mock.patch(
+        "bespokelabs.sandbox.backends.runpod.time.monotonic",
+        side_effect=[100.0, 101.0],
+    )
+    @mock.patch("bespokelabs.sandbox.backends.runpod.subprocess.run")
+    def test_timed_out_ssh_probe_cleans_up_the_pod(
+        self, run: mock.Mock, monotonic: mock.Mock
+    ) -> None:
+        del monotonic
+        run.side_effect = subprocess.TimeoutExpired([], timeout=4.0)
+        api = _FakeApi(_ready_pod())
+        client = _client(api)
+        config = SandboxConfig(
+            backend="runpod",
+            gpu="NVIDIA L40S",
+            backend_options={"create_timeout_secs": 5},
+        )
+
+        with self.assertRaises(SandboxTimeoutError) as ctx:
+            client.create(config)
+
+        self.assertEqual(ctx.exception.op, "create")
+        self.assertEqual(ctx.exception.context["pod_id"], "pod-123")
+        self.assertEqual(api.deleted, ["pod-123"])
+
     def test_create_failure_terminates_the_billing_pod(self) -> None:
         pod = {"id": "pod-123", "desiredStatus": "TERMINATED"}
         api = _FakeApi(pod)
@@ -412,11 +465,42 @@ class RunpodSessionTests(unittest.TestCase):
         api.delete_error = RuntimeError("temporary failure")
         session = _session(api)
 
-        session.destroy()
+        with self.assertRaises(SandboxConnectionError):
+            session.destroy()
         self.assertEqual(session.session_state()["pod_id"], "pod-123")
 
         api.delete_error = None
         session.destroy()
+        self.assertEqual(api.deleted, ["pod-123", "pod-123"])
+
+    def test_destroy_treats_an_already_deleted_pod_as_success(self) -> None:
+        api = _FakeApi(_ready_pod())
+        api.delete_error = _RunpodApiError("not found", status_code=404)
+        session = _session(api)
+
+        session.destroy()
+
+        with self.assertRaisesRegex(
+            SandboxNotFoundError, "already been destroyed"
+        ):
+            session.session_state()
+
+    def test_sandbox_destroy_remains_retryable_after_api_failure(self) -> None:
+        api = _FakeApi(_ready_pod())
+        api.delete_error = RuntimeError("temporary failure")
+        sandbox = Sandbox._from_session(
+            "runpod",
+            _session(api),
+            SandboxConfig(backend="runpod"),
+        )
+
+        with self.assertRaises(SandboxConnectionError):
+            sandbox.destroy()
+        self.assertTrue(sandbox.is_alive)
+
+        api.delete_error = None
+        sandbox.destroy()
+        self.assertFalse(sandbox.is_alive)
         self.assertEqual(api.deleted, ["pod-123", "pod-123"])
 
     @mock.patch("bespokelabs.sandbox.backends.runpod.subprocess.run")

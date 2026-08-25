@@ -104,7 +104,8 @@ for backend in [
     "local", "safehouse", "docker", "modal", "runpod",
     "e2b", "daytona", "tensorlake", "ray",
 ]:
-    with Sandbox(backend) as sb:
+    options = {"gpu": "NVIDIA L4"} if backend == "runpod" else {}
+    with Sandbox(backend, **options) as sb:
         sb.execute_code('print("same code, any backend")')
 ```
 
