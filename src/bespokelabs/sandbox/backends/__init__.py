@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bespokelabs.sandbox.backends.crucible import CrucibleClient
 from bespokelabs.sandbox.backends.daytona import DaytonaClient
 from bespokelabs.sandbox.backends.docker import DockerClient
 from bespokelabs.sandbox.backends.e2b import E2BClient
@@ -17,6 +18,7 @@ from bespokelabs.sandbox.backends.tensorlake import TensorlakeClient
 # method produces live sandbox sessions.
 BACKENDS: dict[str, type] = {
     "daytona": DaytonaClient,
+    "crucible": CrucibleClient,
     "tensorlake": TensorlakeClient,
     "modal": ModalClient,
     "e2b": E2BClient,
