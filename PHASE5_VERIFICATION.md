@@ -10,8 +10,8 @@ credentials or billable resources were used.
 | Pinned formatter | Pyink 24.10.1: 61 files unchanged |
 | Static analysis | Ruff with cache disabled: clean |
 | Byte compilation | `src` and `tests`: clean |
-| Complete offline suite | 275 passed, 81 skipped, 2 subtests passed |
-| Database compatibility | Fresh schema v7 and legacy in-place migration/reopen passed |
+| Complete offline suite | 277 passed, 81 skipped, 2 subtests passed |
+| Database compatibility | Fresh schema v8 and legacy in-place migration/reopen passed |
 | Distribution | sdist and wheel built without isolation |
 | Clean wheel install | Version 0.1.3, API entry point, and dashboard assets verified |
 | Production-style browser | Login → live inventory → launch → terminate → reconciled cost → denial → CSV → audit passed |
@@ -85,7 +85,7 @@ credentials or billable resources were used.
 | CSRF, CSP/headers, audit, redaction | Session security test, E2E audit assertions, secret persistence checks, and zero-error browser run |
 | Retention and large-data pagination | Retention deletion/preservation test; cursor pages for alerts, audit, and exports; malformed cursor test |
 | Complete operational documentation | `docs/CONTROL_PLANE_OPERATIONS.md`, `docs/CONTROL_PLANE_API.md`, and updated README |
-| Full release pipeline | Formatter, Ruff, compile, 275-test suite, schema v7 migration, sdist/wheel build/install, and browser smoke above |
+| Full release pipeline | Formatter, Ruff, compile, 277-test suite, schema v8 migration, sdist/wheel build/install, and browser smoke above |
 | Production-style acceptance gate | `ProductionEndToEndTest` plus rendered login/launch/live/terminate/reconciled/denial/export/audit flow |
 | Final evidence acceptance gate | This requirement-by-requirement matrix and the checked authoritative roadmap |
 

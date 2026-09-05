@@ -385,6 +385,10 @@ _MIGRATIONS = (
         7,
         ("ALTER TABLE orphan_cleanups ADD COLUMN claimed_at TEXT",),
     ),
+    (
+        8,
+        ("ALTER TABLE orphan_cleanups ADD COLUMN claim_id TEXT",),
+    ),
 )
 
 
@@ -918,7 +922,7 @@ class SQLiteStore:
         created_at: str,
         resource_type: str | None = None,
         resource_id: str | None = None,
-    ) -> bool:
+    ) -> str | None:
         with self._connect() as connection:
             cursor = connection.execute(
                 """INSERT OR IGNORE INTO alert_events(
@@ -1461,7 +1465,8 @@ class SQLiteStore:
         observed_at: str,
         claimed_at: str,
         stale_before: str,
-    ) -> bool:
+    ) -> str | None:
+        claim_id = _id("clm")
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
@@ -1475,52 +1480,81 @@ class SQLiteStore:
                     or existing["claimed_at"] < stale_before
                 )
                 if existing["status"] != "failed" and not is_stale_claim:
-                    return False
+                    return None
                 connection.execute(
                     """UPDATE orphan_cleanups SET status='claimed',
-                       organization_id=?, observed_at=?, claimed_at=?,
+                       organization_id=?, observed_at=?, claimed_at=?, claim_id=?,
                        completed_at=NULL
                        WHERE backend=? AND provider_resource_id=?""",
                     (
                         organization_id,
                         observed_at,
                         claimed_at,
+                        claim_id,
                         backend,
                         provider_resource_id,
                     ),
                 )
-                return True
+                return claim_id
             connection.execute(
                 """INSERT INTO orphan_cleanups(
                    backend, provider_resource_id, organization_id,
-                   status, observed_at, claimed_at)
-                   VALUES (?, ?, ?, 'claimed', ?, ?)""",
+                   status, observed_at, claimed_at, claim_id)
+                   VALUES (?, ?, ?, 'claimed', ?, ?, ?)""",
                 (
                     backend,
                     provider_resource_id,
                     organization_id,
                     observed_at,
                     claimed_at,
+                    claim_id,
                 ),
             )
-        return True
+        return claim_id
+
+    def renew_orphan_cleanup_claim(
+        self,
+        backend: str,
+        provider_resource_id: str,
+        *,
+        claim_id: str,
+        claimed_at: str,
+    ) -> bool:
+        """Renew a still-current claim immediately before provider deletion."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """UPDATE orphan_cleanups SET claimed_at=?
+                   WHERE backend=? AND provider_resource_id=?
+                   AND status='claimed' AND claim_id=?""",
+                (claimed_at, backend, provider_resource_id, claim_id),
+            )
+        return cursor.rowcount == 1
 
     def complete_orphan_cleanup(
         self,
         backend: str,
         provider_resource_id: str,
         *,
+        claim_id: str,
         status: str,
         completed_at: str,
-    ) -> None:
+    ) -> bool:
         if status not in {"deleted", "failed"}:
             raise ValueError("invalid orphan cleanup status")
         with self._connect() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """UPDATE orphan_cleanups SET status=?, completed_at=?
-                   WHERE backend=? AND provider_resource_id=?""",
-                (status, completed_at, backend, provider_resource_id),
+                   WHERE backend=? AND provider_resource_id=?
+                   AND status='claimed' AND claim_id=?""",
+                (
+                    status,
+                    completed_at,
+                    backend,
+                    provider_resource_id,
+                    claim_id,
+                ),
             )
+        return cursor.rowcount == 1
 
     def record_provider_health(
         self,

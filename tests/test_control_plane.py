@@ -505,7 +505,8 @@ class SQLiteMigrationTest(unittest.TestCase):
                 ).fetchall()
 
             self.assertEqual(
-                versions, [(1,), (2,), (3,), (4,), (5,), (6,), (7,)]
+                versions,
+                [(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,)],
             )
             self.assertIsNone(alerts.budget_threshold_percent)
             self.assertTrue(alerts.provider_degradation_enabled)
@@ -575,7 +576,8 @@ class SQLiteMigrationTest(unittest.TestCase):
                        'audit_log', 'retention_policies') ORDER BY name"""
                 ).fetchall()
             self.assertEqual(
-                versions, [(1,), (2,), (3,), (4,), (5,), (6,), (7,)]
+                versions,
+                [(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,)],
             )
             self.assertEqual(observation_table, ("provider_observations",))
             self.assertEqual(policy_table, ("organization_policies",))

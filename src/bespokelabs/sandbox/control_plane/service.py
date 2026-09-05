@@ -355,24 +355,23 @@ class ControlPlane:
         record = self.store.get_sandbox(principal.organization_id, sandbox_id)
         if record.status == "destroyed":
             return record
+        terminator = self._provider_terminators.get(record.backend)
         with self._lock:
             runtime = self._runtimes.get(sandbox_id)
-        terminator = self._provider_terminators.get(record.backend)
-        if runtime is None and (
-            terminator is None or record.provider_resource_id is None
-        ):
-            raise ConflictError(
-                "sandbox runtime is not attached and provider termination "
-                "is not configured"
+            if runtime is None and (
+                terminator is None or record.provider_resource_id is None
+            ):
+                raise ConflictError(
+                    "sandbox runtime is not attached and provider termination "
+                    "is not configured"
+                )
+            stopping_at = self._now().isoformat()
+            self.store.begin_termination(
+                principal.organization_id,
+                sandbox_id,
+                timestamp=stopping_at,
+                expected_version=expected_version,
             )
-        stopping_at = self._now().isoformat()
-        self.store.begin_termination(
-            principal.organization_id,
-            sandbox_id,
-            timestamp=stopping_at,
-            expected_version=expected_version,
-        )
-        with self._lock:
             if runtime is not None:
                 self._runtimes.pop(sandbox_id, None)
         try:
@@ -856,10 +855,11 @@ class ControlPlane:
         self.stop_supervision()
         with self._lock:
             runtimes = list(self._runtimes.items())
+            stopping_at = self._now().isoformat()
+            for sandbox_id, _ in runtimes:
+                self.store.mark_lifecycle(sandbox_id, "stopping", stopping_at)
             self._runtimes.clear()
         for sandbox_id, runtime in runtimes:
-            stopping_at = self._now().isoformat()
-            self.store.mark_lifecycle(sandbox_id, "stopping", stopping_at)
             try:
                 runtime.destroy()
             except Exception:
@@ -1052,47 +1052,60 @@ class ControlPlane:
                 for observation in observations:
                     if observation.provider_resource_id in known:
                         continue
-                    if not self.store.claim_orphan_cleanup(
+                    claim_id = self.store.claim_orphan_cleanup(
                         organization_id=organization_id,
                         backend=backend,
                         provider_resource_id=observation.provider_resource_id,
                         observed_at=observation.observed_at,
                         claimed_at=timestamp,
                         stale_before=stale_before,
+                    )
+                    if claim_id is None:
+                        continue
+                    if not self.store.renew_orphan_cleanup_claim(
+                        backend,
+                        observation.provider_resource_id,
+                        claim_id=claim_id,
+                        claimed_at=self._now().isoformat(),
                     ):
                         continue
                     try:
                         terminator(observation.provider_resource_id)
                     except Exception:
                         cleanup_status = "failed"
-                        result["orphan_failures"] += 1
-                        configuration = self.store.get_alert_configuration(
-                            organization_id
-                        )
-                        if configuration.failed_cleanup_enabled:
-                            self.store.record_alert(
-                                organization_id,
-                                alert_type="failed_cleanup",
-                                severity="critical",
-                                message="Orphan provider cleanup failed.",
-                                resource_type="provider_resource",
-                                resource_id=observation.provider_resource_id,
-                                dedupe_key=(
-                                    "failed_cleanup:orphan:"
-                                    f"{backend}:{observation.provider_resource_id}:"
-                                    f"{timestamp}"
-                                ),
-                                created_at=timestamp,
-                            )
                     else:
                         cleanup_status = "deleted"
-                        result["orphans_deleted"] += 1
-                    self.store.complete_orphan_cleanup(
+                    completed = self.store.complete_orphan_cleanup(
                         backend,
                         observation.provider_resource_id,
+                        claim_id=claim_id,
                         status=cleanup_status,
                         completed_at=timestamp,
                     )
+                    if not completed:
+                        continue
+                    if cleanup_status == "deleted":
+                        result["orphans_deleted"] += 1
+                        continue
+                    result["orphan_failures"] += 1
+                    configuration = self.store.get_alert_configuration(
+                        organization_id
+                    )
+                    if configuration.failed_cleanup_enabled:
+                        self.store.record_alert(
+                            organization_id,
+                            alert_type="failed_cleanup",
+                            severity="critical",
+                            message="Orphan provider cleanup failed.",
+                            resource_type="provider_resource",
+                            resource_id=observation.provider_resource_id,
+                            dedupe_key=(
+                                "failed_cleanup:orphan:"
+                                f"{backend}:{observation.provider_resource_id}:"
+                                f"{timestamp}"
+                            ),
+                            created_at=timestamp,
+                        )
         for organization_id in self.store.list_organization_ids():
             self._evaluate_alerts(organization_id)
         return result

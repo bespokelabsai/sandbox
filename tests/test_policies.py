@@ -282,6 +282,58 @@ class PolicyConcurrencyTest(unittest.TestCase):
 
 class SupervisorTest(unittest.TestCase):
 
+    def test_api_termination_and_close_destroy_a_runtime_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SQLiteStore(
+                Path(directory) / "termination-race.db",
+                key_pepper="termination-race",
+            )
+            factory = PolicyFactory()
+            service = ControlPlane(
+                store,
+                sandbox_factory=factory,
+                allowed_backends={"daytona"},
+                supervision_interval_secs=0,
+            )
+            _, key = service.bootstrap_organization("Termination race")
+            principal = store.authenticate(key.secret)
+            created = service.create_sandbox(principal, "daytona", {})
+            transition_entered = threading.Event()
+            release_transition = threading.Event()
+            original_transition = store.begin_termination
+
+            def blocking_transition(*args: object, **kwargs: object):
+                transition_entered.set()
+                release_transition.wait(timeout=2)
+                return original_transition(*args, **kwargs)
+
+            store.begin_termination = blocking_transition  # type: ignore[method-assign]
+            errors: list[BaseException] = []
+
+            def terminate() -> None:
+                try:
+                    service.destroy_sandbox(principal, created.id)
+                except BaseException as exc:
+                    errors.append(exc)
+
+            api_thread = threading.Thread(target=terminate)
+            close_thread = threading.Thread(target=service.close)
+            api_thread.start()
+            self.assertTrue(transition_entered.wait(timeout=2))
+            close_thread.start()
+            release_transition.set()
+            api_thread.join(timeout=2)
+            close_thread.join(timeout=2)
+
+            self.assertFalse(api_thread.is_alive())
+            self.assertFalse(close_thread.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual(factory.created[0].destroyed, True)
+            self.assertEqual(
+                store.get_sandbox(principal.organization_id, created.id).status,
+                "destroyed",
+            )
+
     def test_api_termination_does_not_claim_without_a_cleanup_adapter(
         self,
     ) -> None:
@@ -563,6 +615,64 @@ class SupervisorTest(unittest.TestCase):
             self.assertEqual(recovered["orphans_deleted"], 1)
             self.assertEqual(deleted, ["resource-after-crash"])
             restarted.close()
+
+    def test_stale_orphan_completion_cannot_overwrite_current_claim(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SQLiteStore(
+                Path(directory) / "orphan-generation.db",
+                key_pepper="orphan-generation",
+            )
+            org = store.create_organization("Orphan generation")
+            first_at = datetime(2026, 9, 4, tzinfo=UTC)
+            second_at = first_at + timedelta(seconds=61)
+            first_claim = store.claim_orphan_cleanup(
+                organization_id=org["id"],
+                backend="daytona",
+                provider_resource_id="resource-generation",
+                observed_at=first_at.isoformat(),
+                claimed_at=first_at.isoformat(),
+                stale_before=(first_at - timedelta(seconds=60)).isoformat(),
+            )
+            second_claim = store.claim_orphan_cleanup(
+                organization_id=org["id"],
+                backend="daytona",
+                provider_resource_id="resource-generation",
+                observed_at=second_at.isoformat(),
+                claimed_at=second_at.isoformat(),
+                stale_before=(second_at - timedelta(seconds=60)).isoformat(),
+            )
+
+            self.assertIsNotNone(first_claim)
+            self.assertIsNotNone(second_claim)
+            self.assertNotEqual(first_claim, second_claim)
+            self.assertFalse(
+                store.renew_orphan_cleanup_claim(
+                    "daytona",
+                    "resource-generation",
+                    claim_id=first_claim or "",
+                    claimed_at=second_at.isoformat(),
+                )
+            )
+            self.assertFalse(
+                store.complete_orphan_cleanup(
+                    "daytona",
+                    "resource-generation",
+                    claim_id=first_claim or "",
+                    status="deleted",
+                    completed_at=second_at.isoformat(),
+                )
+            )
+            self.assertTrue(
+                store.complete_orphan_cleanup(
+                    "daytona",
+                    "resource-generation",
+                    claim_id=second_claim or "",
+                    status="deleted",
+                    completed_at=second_at.isoformat(),
+                )
+            )
 
 
 @unittest.skipIf(TestClient is None, "server dependencies are not installed")
