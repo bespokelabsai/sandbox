@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'self'; object-src 'none'" />
+    <meta name="description" content="Operate sandboxes, inspect lifecycle history, and monitor infrastructure spend." />
+    <title>Operations — Bespoke Sandbox</title>
+    <link rel="stylesheet" href="/dashboard/assets/dashboard.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#mainContent">Skip to dashboard</a>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">B</span><div><strong>Bespoke</strong><span>Sandbox control</span></div></div>
+        <nav aria-label="Dashboard sections">
+          <a class="nav-item active" href="#overview"><span class="nav-icon" aria-hidden="true">⌁</span>Overview</a>
+          <a class="nav-item" href="#sandboxes"><span class="nav-icon" aria-hidden="true">□</span>Sandboxes</a>
+          <a class="nav-item" id="guardrailsNav" href="#guardrails"><span class="nav-icon" aria-hidden="true">◈</span>Guardrails</a>
+          <a class="nav-item" id="activityNav" href="#activity"><span class="nav-icon" aria-hidden="true">◎</span>Activity</a>
+          <a class="nav-item" href="#spend"><span class="nav-icon" aria-hidden="true">↘</span>Spend</a>
+        </nav>
+        <div class="connection-card">
+          <div class="connection-label"><span class="status-dot" id="connectionDot"></span><span id="connectionStatus">Not connected</span></div>
+          <p id="accessSummary">Tenant data is read directly from this control plane.</p>
+        </div>
+      </aside>
+
+      <main id="mainContent">
+        <header class="topbar">
+          <div><p class="eyebrow">Control plane</p><h1>Sandbox operations</h1></div>
+          <div class="header-actions">
+            <span class="updated-at" id="updatedAt">Waiting to connect</span>
+            <button class="button secondary" id="refreshButton" type="button" hidden>Refresh</button>
+            <button class="button quiet" id="disconnectButton" type="button" hidden>Disconnect</button>
+          </div>
+        </header>
+
+        <div class="notice error" id="errorNotice" role="alert" hidden></div>
+        <div class="notice info" id="permissionNotice" hidden>Read-only access. Destructive controls are hidden.</div>
+
+        <section class="access-panel" id="accessPanel">
+          <div class="access-copy">
+            <span class="access-icon" aria-hidden="true">↗</span>
+            <div><p class="eyebrow">Secure dashboard access</p><h2 id="loginHeading">Start an HTTP-only session</h2><p id="loginCopy">Exchange your product API key once for a secure, same-site dashboard session. The credential is never stored by browser code.</p></div>
+          </div>
+          <form id="keyForm" class="key-form">
+            <label for="apiKey">Product API key</label>
+            <div class="key-row"><input id="apiKey" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="bsk_live_…" required /><button class="button primary" type="submit">Open dashboard</button></div>
+          </form>
+        </section>
+
+        <div id="dashboard" hidden>
+          <section class="metric-grid" id="overview" aria-label="Operational summary">
+            <article class="metric-card accent"><div class="metric-heading"><span>Active resources</span><span class="metric-glyph">□</span></div><strong id="activeResources">—</strong><p>Creating, running, or stopping now</p></article>
+            <article class="metric-card"><div class="metric-heading"><span>Failed launches</span><span class="metric-glyph">!</span></div><strong id="failedLaunches">—</strong><p>Provisioning failures requiring review</p></article>
+            <article class="metric-card"><div class="metric-heading"><span>Unreconciled spend</span><span class="metric-glyph">↻</span></div><strong id="unreconciledSpend">—</strong><p>Estimated cost awaiting provider data</p></article>
+            <article class="metric-card"><div class="metric-heading"><span>Nearing TTL</span><span class="metric-glyph">◷</span></div><strong id="ttlNearing">—</strong><p>Active resources near expiration</p></article>
+          </section>
+
+          <section class="panel launch-panel" id="launchPanel" hidden>
+            <div class="panel-header"><div><p class="eyebrow">Authorized action</p><h2>Launch sandbox</h2></div><span class="table-count">Policy checked before provider access</span></div>
+            <form class="launch-form" id="launchForm">
+              <label>Provider<input id="launchBackend" name="backend" value="daytona" required /></label>
+              <label>Preset<input id="launchPreset" name="preset" value="dashboard-cpu" /></label>
+              <label>GPU type<input id="launchGpu" name="gpu" placeholder="Optional" /></label>
+              <label>Lifetime (seconds)<input id="launchTimeout" name="timeout" type="number" min="1" value="300" required /></label>
+              <button class="button primary" id="launchButton" type="submit">Launch sandbox</button>
+            </form>
+          </section>
+
+          <section class="governance-grid" id="guardrails" hidden>
+            <article class="panel governance-panel" aria-labelledby="quotaHeading">
+              <div class="panel-header"><div><p class="eyebrow">Organization policy</p><h2 id="quotaHeading">Budget &amp; quota</h2></div><span class="policy-version" id="policyVersion"></span></div>
+              <div class="quota-list" id="quotaList"></div>
+              <div class="allowlist-summary" id="allowlistSummary"></div>
+            </article>
+            <article class="panel governance-panel" aria-labelledby="healthHeading">
+              <div class="panel-header"><div><p class="eyebrow">Server-owned configuration</p><h2 id="healthHeading">Provider health</h2></div></div>
+              <div class="health-list" id="healthList"></div>
+            </article>
+            <article class="panel governance-panel denials-panel" aria-labelledby="denialsHeading">
+              <div class="panel-header"><div><p class="eyebrow">Guardrail decisions</p><h2 id="denialsHeading">Recent denials</h2></div><span class="table-count" id="denialCount"></span></div>
+              <div class="denial-list" id="denialList"></div>
+            </article>
+          </section>
+
+          <section class="panel table-panel" id="sandboxes" aria-labelledby="sandboxHeading">
+            <div class="panel-header table-title-row"><div><p class="eyebrow">Live inventory</p><h2 id="sandboxHeading">Sandboxes</h2></div><span class="table-count" id="tableCount" aria-live="polite"></span></div>
+            <form class="filter-bar" id="filterForm" aria-label="Sandbox filters">
+              <label>Status<select id="statusFilter"><option value="all">All statuses</option><option value="running">Running</option><option value="creating">Creating</option><option value="stopping">Stopping</option><option value="failed">Failed</option><option value="destroyed">Terminated</option></select></label>
+              <label>Provider<select id="providerFilter"><option value="all">All providers</option></select></label>
+              <label>Created<select id="dateFilter"><option value="all">Any time</option><option value="1">Past 24 hours</option><option value="7">Past 7 days</option><option value="30">Past 30 days</option></select></label>
+              <button class="button quiet clear-filters" id="clearFilters" type="button">Clear filters</button>
+            </form>
+            <div class="table-state" id="loadingState" role="status">Loading sandbox inventory…</div>
+            <div class="table-state" id="emptyState" hidden>No sandboxes match these filters.</div>
+            <div class="table-scroll" id="tableScroll" hidden>
+              <table>
+                <thead><tr><th>Sandbox</th><th>Provider resource</th><th>Compute</th><th>Rate</th><th>Age / TTL</th><th>Cleanup</th><th>Reconciliation</th><th><span class="sr-only">Actions</span></th></tr></thead>
+                <tbody id="sandboxRows"></tbody>
+              </table>
+            </div>
+            <div class="pagination" id="pagination" hidden><button class="button secondary" id="previousPage" type="button">Previous</button><span id="pageLabel"></span><button class="button secondary" id="nextPage" type="button">Next</button></div>
+          </section>
+
+          <section class="dashboard-grid" id="spend">
+            <article class="panel spend-panel"><div class="panel-header"><div><p class="eyebrow">Customer spend</p><h2>Daily usage</h2></div><div class="period-tabs" id="periodTabs" aria-label="Usage period"><button type="button" data-days="7">7d</button><button type="button" class="active" data-days="30">30d</button><button type="button" data-days="90">90d</button><button type="button" data-days="all">All</button></div></div><div class="chart-wrap" id="spendChart" aria-live="polite"></div></article>
+            <article class="panel"><div class="panel-header"><div><p class="eyebrow">Cost footprint</p><h2>By provider</h2></div></div><div class="provider-list" id="providerList"></div></article>
+          </section>
+
+          <section class="activity-grid" id="activity" hidden>
+            <article class="panel"><div class="panel-header"><div><p class="eyebrow">Tenant notifications</p><h2>Operational alerts</h2></div><span class="table-count" id="alertCount"></span></div><div class="activity-list" id="alertList"></div></article>
+            <article class="panel"><div class="panel-header"><div><p class="eyebrow">Append-only history</p><h2>Audit activity</h2></div><span class="table-count" id="auditCount"></span></div><div class="activity-list" id="auditList"></div></article>
+            <article class="panel export-panel" id="exportPanel" hidden><div class="panel-header"><div><p class="eyebrow">Tenant-scoped data</p><h2>CSV exports</h2></div></div><p>Download one bounded page at a time. Continuation cursors are returned for larger datasets.</p><div class="export-actions"><button class="button secondary export-button" data-kind="usage" type="button">Usage CSV</button><button class="button secondary export-button" data-kind="costs" type="button">Costs CSV</button><button class="button secondary export-button" data-kind="ledger" type="button">Ledger CSV</button></div></article>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <dialog class="detail-dialog" id="detailDialog" aria-labelledby="detailTitle">
+      <div class="dialog-shell"><header class="dialog-header"><div><p class="eyebrow">Sandbox detail</p><h2 id="detailTitle">Sandbox</h2></div><button class="icon-button" id="closeDetail" type="button" aria-label="Close sandbox detail">×</button></header><div id="detailLoading" class="detail-loading" role="status">Loading operational history…</div><div id="detailContent"></div><footer class="dialog-footer" id="detailFooter"></footer></div>
+    </dialog>
+
+    <dialog class="confirm-dialog" id="confirmDialog" aria-labelledby="confirmTitle">
+      <form method="dialog" class="confirm-shell"><span class="warning-mark" aria-hidden="true">!</span><h2 id="confirmTitle">Terminate sandbox?</h2><p id="confirmCopy">This stops the provider resource and finalizes lifecycle cost.</p><div class="confirm-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button danger" id="confirmTerminate" value="confirm">Terminate sandbox</button></div></form>
+    </dialog>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <script src="/dashboard/assets/dashboard.js" defer></script>
+  </body>
+</html>

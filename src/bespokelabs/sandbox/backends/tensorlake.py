@@ -107,6 +107,12 @@ class TensorlakeSession:
         self._sandbox: object = sandbox
         self._workdir = workdir
 
+    @property
+    def provider_resource_id(self) -> str | None:
+        """Return the Tensorlake sandbox ID while it is attached."""
+        value = getattr(self._sandbox, "sandbox_id", None)
+        return str(value) if value is not None else None
+
     def execute_code(
         self, code: str, language: str = "python"
     ) -> SandboxResult:

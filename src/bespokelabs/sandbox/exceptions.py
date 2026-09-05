@@ -22,9 +22,21 @@ class ErrorCode(str, Enum):
     COMMAND_FAILED = "command_failed"
     TIMEOUT = "timeout"
     CONNECTION = "connection"
+    AUTHENTICATION = "authentication"
     NOT_FOUND = "not_found"
     FEATURE_NOT_SUPPORTED = "feature_not_supported"
     WORKSPACE = "workspace"
+
+
+class ErrorOutcome(str, Enum):
+    """Whether an operation is known to have failed without side effects.
+
+    ``UNKNOWN`` is deliberately conservative: callers must not retry a create
+    whose provider-side outcome could not be established.
+    """
+
+    FAILED = "failed"
+    UNKNOWN = "unknown"
 
 
 class SandboxError(Exception):
@@ -37,6 +49,7 @@ class SandboxError(Exception):
     - ``backend``   which backend raised it (e.g. ``"daytona"``)
     - ``op``        the operation in flight (e.g. ``"create"``, ``"exec"``)
     - ``retryable`` whether retrying the operation might succeed
+    - ``outcome``   whether failure is proven or provider state is unknown
     - ``context``   extra detail (exit codes, paths, …)
 
     The original cause is preserved through ``raise … from`` (``__cause__``).
@@ -57,6 +70,7 @@ class SandboxError(Exception):
         context: dict[str, Any] | None = None,
         retryable: bool | None = None,
         code: ErrorCode | None = None,
+        outcome: ErrorOutcome | str = ErrorOutcome.FAILED,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -67,6 +81,7 @@ class SandboxError(Exception):
             self.code = code
         if retryable is not None:
             self.retryable = retryable
+        self.outcome = ErrorOutcome(outcome)
 
     def __str__(self) -> str:
         # Backward compatible: with no structured fields, this is the message.
@@ -130,6 +145,7 @@ class CommandFailedError(SandboxExecutionError):
         context: dict[str, Any] | None = None,
         retryable: bool | None = None,
         code: ErrorCode | None = None,
+        outcome: ErrorOutcome | str = ErrorOutcome.FAILED,
     ) -> None:
         ctx = dict(context) if context else {}
         if exit_code is not None:
@@ -141,6 +157,7 @@ class CommandFailedError(SandboxExecutionError):
             context=ctx,
             retryable=retryable,
             code=code,
+            outcome=outcome,
         )
         self.exit_code = exit_code
         self.stdout = stdout
@@ -159,6 +176,12 @@ class SandboxConnectionError(SandboxError):
 
     code = ErrorCode.CONNECTION
     retryable = True
+
+
+class SandboxAuthenticationError(SandboxCreationError):
+    """A provider rejected its server-owned credentials."""
+
+    code = ErrorCode.AUTHENTICATION
 
 
 class SandboxNotFoundError(SandboxError):

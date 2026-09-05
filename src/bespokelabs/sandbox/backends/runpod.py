@@ -524,6 +524,11 @@ class RunpodSession:
             "cost_per_hour": self.cost_per_hour,
         }
 
+    @property
+    def provider_resource_id(self) -> str | None:
+        """Return the RunPod Pod ID while it is attached."""
+        return self._pod_id
+
     def destroy(self) -> None:
         pod_id = self._pod_id
         if pod_id is None:

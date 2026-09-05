@@ -120,6 +120,12 @@ class DockerSession:
         self._container: object = container
         self._timeout = timeout
 
+    @property
+    def provider_resource_id(self) -> str | None:
+        """Return the Docker container ID while it is attached."""
+        value = getattr(self._container, "id", None)
+        return str(value) if value is not None else None
+
     def execute_code(
         self, code: str, language: str = "python"
     ) -> SandboxResult:

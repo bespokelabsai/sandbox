@@ -10,8 +10,11 @@ import unittest
 
 from bespokelabs.sandbox import Sandbox, SandboxPreset
 from bespokelabs.sandbox.exceptions import (
+    ErrorCode,
+    ErrorOutcome,
     SandboxConfigurationError,
     SandboxCreationError,
+    SandboxTimeoutError,
 )
 from bespokelabs.sandbox.types import SandboxConfig
 
@@ -27,6 +30,8 @@ if _HAS_DAYTONA:
         _CREATE_TOKEN_LABEL,
         DaytonaClient,
         _build_params,
+        _classify_daytona_error,
+        _CleanupReport,
     )
 
 
@@ -74,9 +79,13 @@ class _FakeDaytona:
         *,
         fail_with: BaseException | None = None,
         list_error: Exception | None = None,
+        delete_error: Exception | None = None,
+        create_resource_on_failure: bool = True,
     ) -> None:
         self._fail_with = fail_with
         self._list_error = list_error
+        self._delete_error = delete_error
+        self._create_resource_on_failure = create_resource_on_failure
         self.live: list[_FakeSandbox] = []
         self.created: list[tuple[object, dict]] = []
         self.deleted: list[_FakeSandbox] = []
@@ -90,7 +99,8 @@ class _FakeDaytona:
             f"sbx-{len(self.created)}",
             dict(getattr(params, "labels", None) or {}),
         )
-        self.live.append(sandbox)
+        if self._fail_with is None or self._create_resource_on_failure:
+            self.live.append(sandbox)
         if self._fail_with is not None:
             raise self._fail_with
         return sandbox
@@ -112,6 +122,8 @@ class _FakeDaytona:
         )
 
     def delete(self, sandbox, timeout: float = 60, wait: bool = False) -> None:
+        if self._delete_error is not None:
+            raise self._delete_error
         self.deleted.append(sandbox)
         self.live.remove(sandbox)
 
@@ -189,6 +201,65 @@ class DaytonaCreateLeakTests(unittest.TestCase):
 
         self.assertIn("Read timed out", str(ctx.exception))
         self.assertNotIn("list is down too", str(ctx.exception))
+        self.assertEqual(ctx.exception.context["cleanup_status"], "unknown")
+        self.assertEqual(ctx.exception.outcome, ErrorOutcome.UNKNOWN)
+        self.assertFalse(ctx.exception.retryable)
+
+    def test_successful_empty_search_reports_not_found(self) -> None:
+        fake = _FakeDaytona(
+            fail_with=RuntimeError("create rejected"),
+            create_resource_on_failure=False,
+        )
+
+        with self.assertRaises(SandboxCreationError) as ctx:
+            _client(fake).create(
+                SandboxConfig(backend="daytona", snapshot_id="snap")
+            )
+
+        self.assertEqual(ctx.exception.context["cleanup_status"], "not_found")
+        self.assertEqual(ctx.exception.outcome, ErrorOutcome.FAILED)
+
+    def test_failed_delete_reports_unknown_and_blocks_timeout_retry(
+        self,
+    ) -> None:
+        from daytona.common.errors import DaytonaConnectionTimeoutError
+
+        fake = _FakeDaytona(
+            fail_with=DaytonaConnectionTimeoutError("response timeout"),
+            delete_error=RuntimeError("delete unavailable"),
+        )
+
+        with self.assertRaises(SandboxTimeoutError) as ctx:
+            _client(fake).create(
+                SandboxConfig(backend="daytona", snapshot_id="snap")
+            )
+
+        error = ctx.exception
+        self.assertEqual(error.code, ErrorCode.TIMEOUT)
+        self.assertEqual(error.context["cleanup_status"], "unknown")
+        self.assertEqual(error.outcome, ErrorOutcome.UNKNOWN)
+        self.assertFalse(error.retryable)
+        self.assertEqual([sandbox.id for sandbox in fake.live], ["sbx-1"])
+
+    def test_typed_timeout_is_classified_without_message_parsing(self) -> None:
+        from daytona.common.errors import DaytonaConnectionTimeoutError
+
+        fake = _FakeDaytona(
+            fail_with=DaytonaConnectionTimeoutError("totally opaque")
+        )
+
+        with self.assertRaises(SandboxTimeoutError) as ctx:
+            _client(fake).create(
+                SandboxConfig(backend="daytona", snapshot_id="snap")
+            )
+
+        error = ctx.exception
+        self.assertEqual(error.code, ErrorCode.TIMEOUT)
+        self.assertEqual(error.backend, "daytona")
+        self.assertEqual(error.op, "create")
+        self.assertTrue(error.retryable)
+        self.assertEqual(error.context["cleanup_status"], "deleted")
+        self.assertEqual(fake.live, [])
 
     def test_keyboard_interrupt_during_create_reaps_and_propagates_unchanged(
         self,
@@ -212,6 +283,58 @@ class DaytonaCreateLeakTests(unittest.TestCase):
 
         self.assertEqual(fake.deleted, [])
         self.assertEqual(len(fake.live), 1)
+
+
+@unittest.skipUnless(_HAS_DAYTONA, "Daytona SDK not installed")
+class DaytonaErrorClassificationTests(unittest.TestCase):
+
+    def test_sdk_types_not_messages_determine_the_error_contract(self) -> None:
+        from daytona.common.errors import (
+            DaytonaAuthenticationError,
+            DaytonaConnectionError,
+            DaytonaConnectionTimeoutError,
+            DaytonaError,
+        )
+
+        cases = [
+            (
+                DaytonaAuthenticationError("looks like a timeout"),
+                "create",
+                ErrorCode.AUTHENTICATION,
+                False,
+            ),
+            (
+                DaytonaConnectionError("looks like bad credentials"),
+                "create",
+                ErrorCode.CONNECTION,
+                True,
+            ),
+            (
+                DaytonaConnectionTimeoutError("unclassified words"),
+                "create",
+                ErrorCode.TIMEOUT,
+                True,
+            ),
+            (
+                DaytonaError("looks like a connection timeout"),
+                "execute",
+                ErrorCode.EXECUTION_FAILED,
+                False,
+            ),
+        ]
+        for sdk_error, op, code, retryable in cases:
+            with self.subTest(code=code):
+                error = _classify_daytona_error(
+                    sdk_error,
+                    op=op,
+                    cleanup=_CleanupReport("not_found")
+                    if op == "create"
+                    else None,
+                )
+                self.assertEqual(error.code, code)
+                self.assertEqual(error.retryable, retryable)
+                self.assertEqual(error.backend, "daytona")
+                self.assertEqual(error.op, op)
 
 
 @unittest.skipUnless(_HAS_DAYTONA, "Daytona SDK not installed")

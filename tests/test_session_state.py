@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from bespokelabs.sandbox import (
@@ -15,8 +16,9 @@ from bespokelabs.sandbox import (
     SandboxError,
     SandboxSessionState,
 )
+from bespokelabs.sandbox.backends.docker import DockerSession
 from bespokelabs.sandbox.exceptions import FeatureNotSupportedError
-from bespokelabs.sandbox.types import SandboxResult
+from bespokelabs.sandbox.types import SandboxConfig, SandboxResult
 
 
 class SessionStateSerializationTests(unittest.TestCase):
@@ -28,6 +30,37 @@ class SessionStateSerializationTests(unittest.TestCase):
         restored = SandboxSessionState.from_json(state.to_json())
         self.assertEqual(restored.backend, "docker")
         self.assertEqual(restored.data["container_id"], "abc")
+
+
+class ProviderResourceIdTests(unittest.TestCase):
+
+    def test_docker_container_id_is_explicit_on_session_and_sandbox(
+        self,
+    ) -> None:
+        session = DockerSession(
+            container=SimpleNamespace(id="container-abc"), timeout=60
+        )
+        sandbox = Sandbox._from_session(
+            "docker", session, SandboxConfig(backend="docker")
+        )
+
+        self.assertEqual(session.provider_resource_id, "container-abc")
+        self.assertEqual(sandbox.provider_resource_id, "container-abc")
+
+    def test_context_manager_cleanup_remains_best_effort(self) -> None:
+        session = mock.Mock()
+        session.destroy.side_effect = RuntimeError("provider unavailable")
+        sandbox = Sandbox._from_session(
+            "local", session, SandboxConfig(backend="local")
+        )
+
+        with self.assertRaisesRegex(ValueError, "body failure"):
+            with sandbox:
+                raise ValueError("body failure")
+
+        with sandbox:
+            pass
+        self.assertEqual(session.destroy.call_count, 2)
 
 
 class LocalResumeTests(unittest.TestCase):
