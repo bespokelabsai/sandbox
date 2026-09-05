@@ -109,6 +109,260 @@ for backend in [
         sb.execute_code('print("same code, any backend")')
 ```
 
+## Hosted control plane
+
+The optional control plane lets a customer use one Bespoke API key across all
+of the providers you operate. Provider credentials remain on the server, and
+every execution is automatically attributed to the customer's organization
+and sandbox.
+
+### 1. Install the server and provider
+
+Install only the provider adapters enabled by this deployment. For a local and
+E2B development server:
+
+```bash
+pip install 'bespokelabs-sandbox[server,e2b]'
+```
+
+From a source checkout, use:
+
+```bash
+pip install -e '.[server,e2b]'
+```
+
+### 2. Configure and start the server
+
+Provider credentials belong on the server. Customers never receive them.
+
+```bash
+export BESPOKE_API_KEY_PEPPER='replace-with-a-long-random-secret'
+export BESPOKE_CONTROL_PLANE_ADMIN_TOKEN='replace-with-another-random-secret'
+export BESPOKE_CONTROL_PLANE_DB='/absolute/path/to/bespoke-control-plane.db'
+export BESPOKE_ALLOWED_BACKENDS='local,e2b'
+export BESPOKE_CUSTOMER_MARKUP='1.20'
+export BESPOKE_SUPERVISION_INTERVAL_SECS='30'
+export BESPOKE_SESSION_COOKIE_SECURE='1'
+export BESPOKE_DASHBOARD_SESSION_TTL_SECS='28800'
+
+# Provider credential — server-side only.
+export E2B_API_KEY='your-e2b-api-key'
+
+bespokelabs-sandbox-api
+```
+
+Verify that it is running:
+
+```bash
+curl http://127.0.0.1:8000/healthz
+# {"status":"ok"}
+```
+
+`BESPOKE_API_KEY_PEPPER` and `BESPOKE_CONTROL_PLANE_DB` are persistent server
+identity. Keep both values unchanged across restarts. Changing the pepper or
+pointing at another database makes previously issued product keys invalid.
+The backend allowlist is also read at startup, so restart the server after
+changing `BESPOKE_ALLOWED_BACKENDS`.
+
+Provider configuration is server-owned. The control plane reads the standard
+Daytona, E2B, Modal, Runpod, and Tensorlake credential variables into memory;
+it never returns their names or values through the product API. Scoped
+provider-health responses expose only the backend, configured state, health
+state, check time, and a fixed safe message. A configured provider remains
+`unchecked` unless a deployment-supplied health checker actually runs; only a
+successful check is reported as `healthy`.
+
+The stock `bespokelabs-sandbox-api` CLI wires provider settings for safe
+configuration visibility only. It does **not** construct provider health
+checkers, reconcilers, or out-of-process terminators. Consequently, stock-CLI
+provider health remains `unchecked`, reconciliation is unavailable, and a
+restarted process cannot reclaim a real cloud resource whose in-memory runtime
+was lost. A production deployment requiring those capabilities must instantiate
+`ControlPlane` in deployment code and inject provider-specific health-check,
+reconciler, and terminator adapters after testing them against that provider.
+
+### 3. Issue the initial product API key
+
+Issue an organization's initial product key through the protected bootstrap
+endpoint. The returned `secret` is shown only in this response:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/organizations \
+  -H "X-Control-Plane-Admin: $BESPOKE_CONTROL_PLANE_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Acme"}'
+```
+
+Copy the returned value beginning with `bsk_live_`. That is the customer-facing
+product key. It is different from `E2B_API_KEY` and works across every backend
+enabled by the server.
+
+### 4. Run a client job
+
+Set the product key in the client environment:
+
+```bash
+export BESPOKE_SANDBOX_KEY='bsk_live_...'
+```
+
+Then create and use a sandbox through the remote client:
+
+```python
+import os
+
+from bespokelabs.sandbox import RemoteSandboxClient
+
+client = RemoteSandboxClient(
+    "http://127.0.0.1:8000",
+    os.environ["BESPOKE_SANDBOX_KEY"],
+)
+
+with client.create(
+    "e2b",
+    timeout_secs=60,
+    idempotency_key="example-launch-001",
+) as sandbox:
+    result = sandbox.execute_code(
+        'print("hello from E2B")',
+        idempotency_key="example-job-001",
+    )
+    print(result.stdout)
+    print(result.usage)
+
+# The same key can create a different provider's sandbox.
+with client.create("local") as sandbox:
+    result = sandbox.execute_command("python", ["--version"])
+    print(result.stdout)
+
+costs = client.costs(group_by="backend")
+print(costs)
+```
+
+The context manager destroys each sandbox automatically. Reusing an
+`idempotency_key` on either creation or execution returns the original logical
+operation without creating, running, or billing it twice. Reusing a creation
+key with a different request is rejected.
+
+Provider failures expose a stable error contract in both HTTP responses and
+`RemoteSandboxError`: `code`, `backend`, `op`, `retryable`, `outcome`, and a
+small, redacted `context`. Sandbox responses include `attempt_count`,
+`latest_error`, `retry_status`, `cleanup_status`, and `provider_resource_id`.
+An ambiguous create has `outcome="unknown"` and
+`retry_status="blocked_cleanup_unknown"`; do not issue a new provider create
+until the possible orphan has been reconciled manually.
+
+Sandbox records also expose requested, provisioning, running, stopping,
+terminated, failed, and last-provider-observation timestamps. Lifecycle cost
+uses the rate, currency, and pricing-source snapshot captured at creation and
+accrues across the whole provider-billable window, including failed setup and
+cleanup. `GET /v1/reconciliation` returns tenant-scoped health; an operator can
+run a configured provider reconciler with
+`POST /v1/reconciliation/{backend}` when the deployment injected that backend's
+reconciler. Provider-reported cost replaces the
+estimate through an idempotent delta ledger, so repeated observations do not
+double-count spend. Billable-time deltas are split at UTC day boundaries, so
+refreshes and later provider-cost adjustments do not move historical usage
+between reporting days.
+
+Sandbox responses also include the creating API-key ID/name and a numeric
+`version`. `GET /v1/sandboxes/{id}/detail` returns the tenant-scoped creation
+attempts, executions, lifecycle cost, and provider-observation history. A
+termination request may send that version in `If-Match`; stale versions are
+rejected with `409`, while repeating a successful termination remains
+idempotent. `GET /v1/session` reports the current key's scopes and whether the
+dashboard may show termination controls.
+
+Organization guardrails are managed with `GET` and `PUT` requests to
+`/v1/policies/current`. They can cap concurrent sandboxes, rolling-hour and
+UTC-day customer spend, allowed backends, allowed GPU types, and requested
+sandbox lifetime. Each create request reserves its concurrency slot and checks
+all limits in one database transaction before any provider call. A denial is a
+stable, non-retryable `policy_denied` response and is attributed to the API key
+that made the request. `GET /v1/policy-summary` returns current quota/spend and
+recent denials. Redacted provider health is available from `GET /v1/providers`
+and `POST /v1/providers/{backend}/health-check`.
+
+The control-plane supervisor terminates expired sandboxes even when the client
+disconnects. Its durable claim state is safe across process restarts, and
+configured provider terminators can clean up resources whose in-memory runtime
+was lost. Reconciliation watchdogs also remove provider resources that do not
+belong to any recorded sandbox, with durable idempotency so a confirmed cleanup
+is not repeated. Set `BESPOKE_SUPERVISION_INTERVAL_SECS` to tune the scan
+interval. These restart-recovery and reconciliation behaviors require injected
+terminator/reconciler adapters; the stock CLI does not supply them.
+
+### 5. Inspect usage in the dashboard
+
+Open [`http://127.0.0.1:8000/dashboard`](http://127.0.0.1:8000/dashboard) and
+enter the `bsk_live_...` product key. The initial organization key has every
+scope. A read-only dashboard key needs both `usage:read` and
+`sandboxes:read`.
+
+The dashboard provides:
+
+- operational cards for active resources, failed launches, unreconciled spend,
+  and resources nearing their TTL;
+- budget/quota progress, backend/GPU/lifetime policy, provider health, and
+  recent policy denials when the key has the corresponding read scopes;
+- status, provider, and creation-date filtering with pagination;
+- creator key, provider resource, compute/GPU, rate, age/TTL, cleanup, and
+  reconciliation state for every sandbox;
+- a detail view for lifecycle, attempts, executions, errors, cost, and provider
+  observations;
+- confirmed, revision-safe termination for keys with `sandboxes:terminate`;
+  legacy `sandboxes:write` keys remain compatible; and
+- automatic refresh while the tab is visible, plus manual refresh.
+
+The production dashboard exchanges the product key for an expiring, HTTP-only,
+Secure, SameSite=Strict cookie and never stores that key in browser storage.
+State-changing requests carry a session-bound CSRF token. For an explicitly
+enabled local-only workflow, set `BESPOKE_ENABLE_LOCAL_DASHBOARD_LOGIN=1`, set
+`BESPOKE_SESSION_COOKIE_SECURE=0` only when serving plain HTTP on loopback, and
+open `/dashboard/local`; that development route keeps the key in the current
+tab's `sessionStorage`. Never expose that route on a shared network. Local
+sandboxes record runtime but have a provider cost of `$0`; use a priced fake or
+cloud backend to exercise spend counters.
+
+The Activity view shows durable alerts and append-only audit history. Operators
+with `exports:read` can download paginated CSV pages for usage, lifecycle costs,
+and ledger entries. Alert thresholds and retention periods are tenant-owned and
+available through the API.
+
+### Security and deployment notes
+
+API keys, browser session cookies, and CSRF tokens are HMAC-hashed at rest.
+Runtime scopes are `sandboxes:read`,
+`sandboxes:create`, `sandboxes:execute`, and `sandboxes:terminate`; governance
+uses `usage:read`, `policies:read`, `policies:write`, `providers:read`, and
+`providers:write`; reconciliation uses `providers:reconcile`; and key issuance
+uses `keys:write`. Operational access uses `alerts:read`, `alerts:write`,
+`audit:read`, `exports:read`, `retention:read`, and `retention:write`. The legacy
+`sandboxes:write` scope grants the four sandbox write operations and provider
+reconciliation for compatibility. Runtime events and provider/customer costs
+are written to an idempotent ledger. All responses carry a restrictive content
+security policy and browser security headers. See the
+[operations runbook](docs/CONTROL_PLANE_OPERATIONS.md) and
+[hosted API contract](docs/CONTROL_PLANE_API.md) before deployment.
+
+Never commit the API-key pepper, admin token, provider credentials, or product
+keys. Revoke and replace a product key if it appears in source code, logs, or
+chat. Environment-variable ownership is:
+
+| Value | Where it belongs |
+|---|---|
+| `E2B_API_KEY` and other provider credentials | Control-plane server only |
+| `BESPOKE_API_KEY_PEPPER` | Control-plane server only; stable across restarts |
+| `BESPOKE_CONTROL_PLANE_ADMIN_TOKEN` | Administrative bootstrap tooling only |
+| `bsk_live_...` / `BESPOKE_SANDBOX_KEY` | Customer client or dashboard |
+
+Common errors:
+
+| Error | Resolution |
+|---|---|
+| `backend is not enabled: e2b` | Add `e2b` to `BESPOKE_ALLOWED_BACKENDS` and restart the server. |
+| `invalid API key` | Confirm the full `bsk_live_...` value, database path, and original pepper. |
+| Provider authentication failure | Install that provider's extra and configure its credential on the server. |
+
 ## API Reference
 
 ### Creating a Sandbox

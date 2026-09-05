@@ -83,6 +83,12 @@ class ModalSession:
     def __init__(self, *, sandbox: object) -> None:
         self._sandbox: object = sandbox
 
+    @property
+    def provider_resource_id(self) -> str | None:
+        """Return the Modal sandbox object ID while it is attached."""
+        value = getattr(self._sandbox, "object_id", None)
+        return str(value) if value is not None else None
+
     def execute_code(
         self, code: str, language: str = "python"
     ) -> SandboxResult:

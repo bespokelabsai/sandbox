@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from bespokelabs.sandbox import (
@@ -15,8 +16,9 @@ from bespokelabs.sandbox import (
     SandboxError,
     SandboxSessionState,
 )
+from bespokelabs.sandbox.backends.docker import DockerSession
 from bespokelabs.sandbox.exceptions import FeatureNotSupportedError
-from bespokelabs.sandbox.types import SandboxResult
+from bespokelabs.sandbox.types import SandboxConfig, SandboxResult
 
 
 class SessionStateSerializationTests(unittest.TestCase):
@@ -28,6 +30,22 @@ class SessionStateSerializationTests(unittest.TestCase):
         restored = SandboxSessionState.from_json(state.to_json())
         self.assertEqual(restored.backend, "docker")
         self.assertEqual(restored.data["container_id"], "abc")
+
+
+class ProviderResourceIdTests(unittest.TestCase):
+
+    def test_docker_container_id_is_explicit_on_session_and_sandbox(
+        self,
+    ) -> None:
+        session = DockerSession(
+            container=SimpleNamespace(id="container-abc"), timeout=60
+        )
+        sandbox = Sandbox._from_session(
+            "docker", session, SandboxConfig(backend="docker")
+        )
+
+        self.assertEqual(session.provider_resource_id, "container-abc")
+        self.assertEqual(sandbox.provider_resource_id, "container-abc")
 
 
 class LocalResumeTests(unittest.TestCase):

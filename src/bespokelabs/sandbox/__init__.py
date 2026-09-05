@@ -28,7 +28,9 @@ from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     CommandFailedError,
     ErrorCode,
+    ErrorOutcome,
     FeatureNotSupportedError,
+    SandboxAuthenticationError,
     SandboxConfigurationError,
     SandboxConnectionError,
     SandboxCreationError,
@@ -39,6 +41,12 @@ from bespokelabs.sandbox.exceptions import (
     WorkspaceError,
 )
 from bespokelabs.sandbox.presets import SandboxPreset
+from bespokelabs.sandbox.remote import (
+    RemoteSandbox,
+    RemoteSandboxClient,
+    RemoteSandboxError,
+    RemoteSandboxResult,
+)
 from bespokelabs.sandbox.sandbox import Sandbox, SandboxClient, json_schema
 from bespokelabs.sandbox.types import (
     AgentRunResult,
@@ -61,6 +69,10 @@ from bespokelabs.sandbox.workspace import (
 __all__ = [
     "Sandbox",
     "SandboxClient",
+    "RemoteSandbox",
+    "RemoteSandboxClient",
+    "RemoteSandboxError",
+    "RemoteSandboxResult",
     "AsyncSandbox",
     "AsyncSandboxClient",
     "AgentSpec",
@@ -93,10 +105,12 @@ __all__ = [
     "CommandFailedError",
     "SandboxTimeoutError",
     "SandboxConnectionError",
+    "SandboxAuthenticationError",
     "SandboxNotFoundError",
     "BackendNotInstalledError",
     "FeatureNotSupportedError",
     "WorkspaceError",
     "ErrorCode",
+    "ErrorOutcome",
     "json_schema",
 ]

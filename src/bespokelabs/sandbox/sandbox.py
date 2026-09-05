@@ -215,6 +215,12 @@ class Sandbox:
 
     # -- Core operations ---------------------------------------------------
 
+    @property
+    def provider_resource_id(self) -> str | None:
+        """Return the backend resource identifier when it exposes one."""
+        value = getattr(self._session, "provider_resource_id", None)
+        return str(value) if value is not None else None
+
     @overload
     def execute_code(
         self, code: str, language: str = "python"
@@ -452,7 +458,7 @@ class Sandbox:
 
         record = parse_claude_result(result.stdout)
         usage = usage_from_result(record) or Usage()
-        usage.compute_cost_usd = self._compute_cost(elapsed)
+        usage.compute_cost_usd = self.estimate_compute_cost(elapsed)
         self._usage = self._usage + usage
 
         text = result_text(record)
@@ -465,8 +471,13 @@ class Sandbox:
             raw=record,
         )
 
-    def _compute_cost(self, elapsed_secs: float) -> float:
-        """Estimate sandbox compute cost for an interval of *elapsed_secs*."""
+    def estimate_compute_cost(self, elapsed_secs: float) -> float:
+        """Estimate this sandbox's compute cost for a measured interval.
+
+        Dynamic provider pricing exposed by the live session takes precedence
+        over the package's bundled CPU/RAM estimates. This is also used by the
+        control plane to meter ordinary command and code executions.
+        """
         # GPU Pod pricing is selected dynamically from live capacity. Backends
         # that expose the actual hourly rate take precedence over the static
         # CPU/RAM estimates bundled with this package.
@@ -479,6 +490,10 @@ class Sandbox:
             ram_gib=self._config.memory_mb / 1024,
         )
         return cost_per_sec * elapsed_secs
+
+    def _compute_cost(self, elapsed_secs: float) -> float:
+        """Compatibility wrapper for the former private cost helper."""
+        return self.estimate_compute_cost(elapsed_secs)
 
     @classmethod
     def resume(cls, state: SandboxSessionState) -> Sandbox:

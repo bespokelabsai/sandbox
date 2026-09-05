@@ -129,6 +129,11 @@ class SafehouseSession:
             "env_vars": self._env_overlay,
         }
 
+    @property
+    def provider_resource_id(self) -> None:
+        """Safehouse sandboxes have no external provider resource."""
+        return None
+
     def destroy(self) -> None:
         try:
             if (

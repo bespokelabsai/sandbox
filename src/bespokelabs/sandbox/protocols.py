@@ -16,6 +16,11 @@ from bespokelabs.sandbox.types import (
 class SandboxBackendSession(Protocol):
     """A live sandbox instance on one backend."""
 
+    @property
+    def provider_resource_id(self) -> str | None:
+        """Provider-owned resource ID, or ``None`` for local-only sessions."""
+        ...
+
     def execute_code(self, code: str, language: str) -> SandboxResult:
         ...
 

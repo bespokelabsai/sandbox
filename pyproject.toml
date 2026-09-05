@@ -24,14 +24,15 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-daytona = ["daytona>=0.1.0"]
+daytona = ["daytona>=0.207.0"]
 tensorlake = ["tensorlake>=0.1.0"]
 modal = ["modal>=0.60.0"]
 e2b = ["e2b-code-interpreter>=1.0.0"]
 docker = ["docker>=7.0.0"]
 ray = ["ray>=2.0.0"]
+server = ["fastapi>=0.115.0", "uvicorn>=0.30.0"]
 all = [
-    "daytona>=0.1.0",
+    "daytona>=0.207.0",
     "tensorlake>=0.1.0",
     "modal>=0.60.0",
     "e2b-code-interpreter>=1.0.0",
@@ -39,7 +40,8 @@ all = [
     "ray>=2.0.0",
 ]
 dev = [
-    "pyink>=24.10.0",
+    "httpx2>=2.12.0",
+    "pyink==24.10.1",
     "pytest>=8.0",
     "ruff>=0.8.0",
 ]
@@ -48,11 +50,15 @@ dev = [
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
+[project.scripts]
+bespokelabs-sandbox-api = "bespokelabs.sandbox.control_plane.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 "bespokelabs.sandbox" = ["pricing.json"]
+"bespokelabs.sandbox.control_plane" = ["static/*"]
 
 [tool.ruff]
 line-length = 80
