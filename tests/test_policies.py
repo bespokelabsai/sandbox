@@ -53,6 +53,7 @@ class PolicyRuntime:
         self.destroyed = False
         self.destroy_calls = 0
         self.crash_on_destroy = False
+        self.fail_destroy = False
 
     def execute_code(
         self, code: str, language: str = "python"
@@ -71,6 +72,8 @@ class PolicyRuntime:
         self.destroy_calls += 1
         if self.crash_on_destroy:
             raise SimulatedProcessCrash
+        if self.fail_destroy:
+            raise RuntimeError("provider unavailable")
         self.destroyed = True
 
 
@@ -355,7 +358,9 @@ class SupervisorTest(unittest.TestCase):
                 "destroyed",
             )
 
-    def test_close_continues_after_a_lifecycle_marking_failure(self) -> None:
+    def test_close_continues_after_provider_and_persistence_failures(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = SQLiteStore(
                 Path(directory) / "close-mark.db", key_pepper="close-mark"
@@ -371,23 +376,20 @@ class SupervisorTest(unittest.TestCase):
             principal = store.authenticate(key.secret)
             service.create_sandbox(principal, "daytona", {})
             service.create_sandbox(principal, "daytona", {})
-            original_mark = store.mark_lifecycle
-            failed_once = False
+            factory.created[0].fail_destroy = True
 
-            def fail_first_mark(*args: object, **kwargs: object):
-                nonlocal failed_once
-                if not failed_once:
-                    failed_once = True
-                    raise RuntimeError("database unavailable")
-                return original_mark(*args, **kwargs)
+            def fail_mark(*args: object, **kwargs: object):
+                raise RuntimeError("database unavailable")
 
-            store.mark_lifecycle = fail_first_mark  # type: ignore[method-assign]
+            store.mark_lifecycle = fail_mark  # type: ignore[method-assign]
 
             service.close()
 
             self.assertEqual(
                 [runtime.destroy_calls for runtime in factory.created], [1, 1]
             )
+            self.assertFalse(factory.created[0].destroyed)
+            self.assertTrue(factory.created[1].destroyed)
 
     def test_api_termination_does_not_claim_without_a_cleanup_adapter(
         self,

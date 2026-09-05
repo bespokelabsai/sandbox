@@ -856,11 +856,10 @@ class ControlPlane:
         with self._lock:
             runtimes = list(self._runtimes.items())
             self._runtimes.clear()
-            stopping_at = self._now().isoformat()
             for sandbox_id, _ in runtimes:
                 try:
                     self.store.mark_lifecycle(
-                        sandbox_id, "stopping", stopping_at
+                        sandbox_id, "stopping", self._now().isoformat()
                     )
                 except Exception:
                     # A persistence failure must not strand later provider
@@ -870,26 +869,27 @@ class ControlPlane:
             try:
                 runtime.destroy()
             except Exception:
-                failed_at = self._now().isoformat()
-                self.store.mark_lifecycle(sandbox_id, "failed", failed_at)
-                self._record_lifecycle_estimate(
-                    self.store.get_sandbox_internal(sandbox_id),
-                    failed_at,
-                    observation_id=f"close-failed:{sandbox_id}",
-                )
+                status = "failed"
+                reason = None
+                observation = f"close-failed:{sandbox_id}"
             else:
-                terminated_at = self._now().isoformat()
+                status = "destroyed"
+                reason = "shutdown"
+                observation = f"close:{sandbox_id}"
+            try:
+                completed_at = self._now().isoformat()
                 self.store.mark_lifecycle(
-                    sandbox_id,
-                    "destroyed",
-                    terminated_at,
-                    reason="shutdown",
+                    sandbox_id, status, completed_at, reason=reason
                 )
                 self._record_lifecycle_estimate(
                     self.store.get_sandbox_internal(sandbox_id),
-                    terminated_at,
-                    observation_id=f"close:{sandbox_id}",
+                    completed_at,
+                    observation_id=observation,
                 )
+            except Exception:
+                # Provider cleanup for later runtimes takes priority over
+                # best-effort shutdown bookkeeping while persistence is down.
+                pass
 
     def _record_usage(
         self,
