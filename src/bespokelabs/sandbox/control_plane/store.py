@@ -922,7 +922,7 @@ class SQLiteStore:
         created_at: str,
         resource_type: str | None = None,
         resource_id: str | None = None,
-    ) -> str | None:
+    ) -> bool:
         with self._connect() as connection:
             cursor = connection.execute(
                 """INSERT OR IGNORE INTO alert_events(

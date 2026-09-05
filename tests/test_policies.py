@@ -51,6 +51,7 @@ class PolicyRuntime:
         self.backend_name = backend
         self.provider_resource_id = resource_id
         self.destroyed = False
+        self.destroy_calls = 0
         self.crash_on_destroy = False
 
     def execute_code(
@@ -67,6 +68,7 @@ class PolicyRuntime:
         return elapsed_secs / 3600
 
     def destroy(self) -> None:
+        self.destroy_calls += 1
         if self.crash_on_destroy:
             raise SimulatedProcessCrash
         self.destroyed = True
@@ -308,6 +310,21 @@ class SupervisorTest(unittest.TestCase):
                 return original_transition(*args, **kwargs)
 
             store.begin_termination = blocking_transition  # type: ignore[method-assign]
+            close_waiting = threading.Event()
+            original_lock = service._lock
+
+            class ObservedLock:
+
+                def __enter__(self):
+                    if threading.current_thread().name == "close-thread":
+                        close_waiting.set()
+                    original_lock.acquire()
+                    return self
+
+                def __exit__(self, *exc: object) -> None:
+                    original_lock.release()
+
+            service._lock = ObservedLock()  # type: ignore[assignment]
             errors: list[BaseException] = []
 
             def terminate() -> None:
@@ -317,10 +334,13 @@ class SupervisorTest(unittest.TestCase):
                     errors.append(exc)
 
             api_thread = threading.Thread(target=terminate)
-            close_thread = threading.Thread(target=service.close)
+            close_thread = threading.Thread(
+                target=service.close, name="close-thread"
+            )
             api_thread.start()
             self.assertTrue(transition_entered.wait(timeout=2))
             close_thread.start()
+            self.assertTrue(close_waiting.wait(timeout=2))
             release_transition.set()
             api_thread.join(timeout=2)
             close_thread.join(timeout=2)
@@ -329,9 +349,44 @@ class SupervisorTest(unittest.TestCase):
             self.assertFalse(close_thread.is_alive())
             self.assertEqual(errors, [])
             self.assertEqual(factory.created[0].destroyed, True)
+            self.assertEqual(factory.created[0].destroy_calls, 1)
             self.assertEqual(
                 store.get_sandbox(principal.organization_id, created.id).status,
                 "destroyed",
+            )
+
+    def test_close_continues_after_a_lifecycle_marking_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SQLiteStore(
+                Path(directory) / "close-mark.db", key_pepper="close-mark"
+            )
+            factory = PolicyFactory()
+            service = ControlPlane(
+                store,
+                sandbox_factory=factory,
+                allowed_backends={"daytona"},
+                supervision_interval_secs=0,
+            )
+            _, key = service.bootstrap_organization("Close marking")
+            principal = store.authenticate(key.secret)
+            service.create_sandbox(principal, "daytona", {})
+            service.create_sandbox(principal, "daytona", {})
+            original_mark = store.mark_lifecycle
+            failed_once = False
+
+            def fail_first_mark(*args: object, **kwargs: object):
+                nonlocal failed_once
+                if not failed_once:
+                    failed_once = True
+                    raise RuntimeError("database unavailable")
+                return original_mark(*args, **kwargs)
+
+            store.mark_lifecycle = fail_first_mark  # type: ignore[method-assign]
+
+            service.close()
+
+            self.assertEqual(
+                [runtime.destroy_calls for runtime in factory.created], [1, 1]
             )
 
     def test_api_termination_does_not_claim_without_a_cleanup_adapter(

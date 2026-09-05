@@ -855,10 +855,17 @@ class ControlPlane:
         self.stop_supervision()
         with self._lock:
             runtimes = list(self._runtimes.items())
+            self._runtimes.clear()
             stopping_at = self._now().isoformat()
             for sandbox_id, _ in runtimes:
-                self.store.mark_lifecycle(sandbox_id, "stopping", stopping_at)
-            self._runtimes.clear()
+                try:
+                    self.store.mark_lifecycle(
+                        sandbox_id, "stopping", stopping_at
+                    )
+                except Exception:
+                    # A persistence failure must not strand later provider
+                    # runtimes during best-effort process shutdown.
+                    pass
         for sandbox_id, runtime in runtimes:
             try:
                 runtime.destroy()
