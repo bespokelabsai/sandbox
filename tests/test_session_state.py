@@ -47,6 +47,21 @@ class ProviderResourceIdTests(unittest.TestCase):
         self.assertEqual(session.provider_resource_id, "container-abc")
         self.assertEqual(sandbox.provider_resource_id, "container-abc")
 
+    def test_context_manager_cleanup_remains_best_effort(self) -> None:
+        session = mock.Mock()
+        session.destroy.side_effect = RuntimeError("provider unavailable")
+        sandbox = Sandbox._from_session(
+            "local", session, SandboxConfig(backend="local")
+        )
+
+        with self.assertRaisesRegex(ValueError, "body failure"):
+            with sandbox:
+                raise ValueError("body failure")
+
+        with sandbox:
+            pass
+        self.assertEqual(session.destroy.call_count, 2)
+
 
 class LocalResumeTests(unittest.TestCase):
     """Local sandboxes reattach by workdir; state survives a fresh client."""

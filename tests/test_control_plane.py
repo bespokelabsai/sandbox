@@ -504,7 +504,9 @@ class SQLiteMigrationTest(unittest.TestCase):
                     "SELECT version FROM schema_migrations ORDER BY version"
                 ).fetchall()
 
-            self.assertEqual(versions, [(1,), (2,), (3,), (4,), (5,), (6,)])
+            self.assertEqual(
+                versions, [(1,), (2,), (3,), (4,), (5,), (6,), (7,)]
+            )
             self.assertIsNone(alerts.budget_threshold_percent)
             self.assertTrue(alerts.provider_degradation_enabled)
             self.assertEqual(retention.operational_days, 90)
@@ -572,7 +574,9 @@ class SQLiteMigrationTest(unittest.TestCase):
                        'web_sessions', 'alert_configurations', 'alert_events',
                        'audit_log', 'retention_policies') ORDER BY name"""
                 ).fetchall()
-            self.assertEqual(versions, [(1,), (2,), (3,), (4,), (5,), (6,)])
+            self.assertEqual(
+                versions, [(1,), (2,), (3,), (4,), (5,), (6,), (7,)]
+            )
             self.assertEqual(observation_table, ("provider_observations",))
             self.assertEqual(policy_table, ("organization_policies",))
             self.assertEqual(denial_table, ("policy_denials",))

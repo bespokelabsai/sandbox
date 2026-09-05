@@ -151,6 +151,7 @@ class DashboardTest(unittest.TestCase):
         self.assertIn("renderSandboxes", script.text)
         self.assertIn("renderGovernance", script.text)
         self.assertIn('api("/v1/policy-summary")', script.text)
+        self.assertIn("session.can_view_usage", script.text)
         self.assertIn("/health-check", script.text)
         self.assertIn(".governance-grid", stylesheet.text)
         self.assertIn(".activity-grid", stylesheet.text)
@@ -256,19 +257,29 @@ class DashboardTest(unittest.TestCase):
 
     def test_read_only_key_can_inspect_but_cannot_terminate(self) -> None:
         created = self.create_sandbox()
-        session = self.client.get("/v1/session", headers=self.read_headers)
-        listing = self.client.get("/v1/sandboxes", headers=self.read_headers)
+        inventory_key = self.service.issue_api_key(
+            self.store.authenticate(self.key.secret),
+            name="Inventory only",
+            scopes=["sandboxes:read"],
+        )
+        inventory_headers = {"Authorization": f"Bearer {inventory_key.secret}"}
+        session = self.client.get("/v1/session", headers=inventory_headers)
+        listing = self.client.get("/v1/sandboxes", headers=inventory_headers)
         detail = self.client.get(
             f"/v1/sandboxes/{created['id']}/detail",
-            headers=self.read_headers,
+            headers=inventory_headers,
         )
         denied = self.client.delete(
             f"/v1/sandboxes/{created['id']}",
-            headers={**self.read_headers, "If-Match": str(created["version"])},
+            headers={
+                **inventory_headers,
+                "If-Match": str(created["version"]),
+            },
         )
 
         self.assertEqual(session.status_code, 200)
         self.assertFalse(session.json()["can_terminate"])
+        self.assertFalse(session.json()["can_view_usage"])
         self.assertEqual(listing.status_code, 200)
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(denied.status_code, 403)

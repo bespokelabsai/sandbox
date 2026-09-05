@@ -1,11 +1,14 @@
 # Hosted control-plane API contract
 
-All `/v1` data is tenant-scoped to the authenticated product key. JSON errors
-use `{"detail": ...}`. Authentication failure is `401`, missing scope or policy
-denial is `403`, missing tenant resource is `404`, stale/idempotency conflict is
-`409`, and invalid input is `422`. Provider errors expose only the stable,
-redacted fields `code`, `backend`, `op`, `retryable`, `outcome`, and `context`.
-Unexpected errors return a fixed `500` message.
+Tenant resources returned by `/v1` are scoped to the authenticated product key.
+Provider configuration and health from `GET /v1/providers` and
+`POST /v1/providers/{backend}/health-check` are deployment-scoped metadata,
+redacted and protected by provider scopes rather than tenant-specific provider
+accounts. JSON errors use `{"detail": ...}`. Authentication failure is `401`,
+missing scope or policy denial is `403`, missing tenant resource is `404`,
+stale/idempotency conflict is `409`, and invalid input is `422`. Provider errors
+expose only the stable, redacted fields `code`, `backend`, `op`, `retryable`,
+`outcome`, and `context`. Unexpected errors return a fixed `500` message.
 
 ## Authentication and request safety
 
@@ -13,9 +16,10 @@ Non-browser clients send `Authorization: Bearer bsk_live_...`. Browser users
 submit the product key once to `POST /v1/dashboard/session`; the response sets
 an expiring `bespoke_dashboard_session` cookie with `HttpOnly`, `Secure`,
 `SameSite=Strict`, and `Path=/`. The key and raw session/CSRF tokens are never
-stored in the database. `GET /v1/session` returns capabilities and rotates the
-CSRF token. Cookie-authenticated `POST`, `PUT`, `PATCH`, and `DELETE` requests
-must send that value in `X-CSRF-Token`. Bearer requests do not use CSRF.
+stored in the database. `GET /v1/session` returns capabilities and the stable
+CSRF token for that session. Cookie-authenticated `POST`, `PUT`, `PATCH`, and
+`DELETE` requests must send that value in `X-CSRF-Token`. Bearer requests do
+not use CSRF.
 
 `/dashboard/local` is available only when explicitly enabled. It uses a Bearer
 key held in tab-local `sessionStorage` and is for loopback development only.
@@ -45,9 +49,11 @@ terminate, and provider reconciliation only.
 |---|---|---|
 | `POST /v1/dashboard/session` | valid product key | Create browser session; returns CSRF and expiry |
 | `DELETE /v1/dashboard/session` | session | Revoke and delete cookie |
-| `GET /v1/session` | authenticated | Identity role, scopes, capabilities, rotated CSRF |
+| `GET /v1/session` | authenticated | Identity role, scopes, capabilities, session CSRF |
 | `POST /v1/organizations` | admin header | Bootstrap tenant and reveal initial key once |
-| `GET/POST/DELETE /v1/api-keys` | `keys:write` | List, issue once, or revoke tenant keys |
+| `GET /v1/api-keys` | `keys:write` | List tenant keys |
+| `POST /v1/api-keys` | `keys:write` | Issue a tenant key and reveal its secret once |
+| `DELETE /v1/api-keys/{key_id}` | `keys:write` | Revoke a tenant key by ID |
 | `POST /v1/sandboxes` | `sandboxes:create` | Policy-atomic, idempotent provider creation |
 | `GET /v1/sandboxes` | `sandboxes:read` | Tenant inventory |
 | `GET /v1/sandboxes/{id}` | `sandboxes:read` | Lifecycle record |

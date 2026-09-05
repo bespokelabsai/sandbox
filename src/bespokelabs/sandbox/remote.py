@@ -125,7 +125,11 @@ class RemoteSandboxClient:
         }
         if body is not None:
             headers["Content-Type"] = "application/json"
-        if idempotency_key:
+        if idempotency_key is not None and not (
+            1 <= len(idempotency_key) <= 255
+        ):
+            raise ValueError("idempotency key must contain 1 to 255 characters")
+        if idempotency_key is not None:
             headers["Idempotency-Key"] = idempotency_key
         request = urllib.request.Request(
             self._base_url + path, data=body, headers=headers, method=method
@@ -219,7 +223,11 @@ class RemoteSandbox:
     ) -> RemoteSandboxResult:
         if self._destroyed:
             raise RemoteSandboxError("sandbox has been destroyed")
-        request_id = idempotency_key or f"req_{uuid.uuid4().hex}"
+        request_id = (
+            idempotency_key
+            if idempotency_key is not None
+            else f"req_{uuid.uuid4().hex}"
+        )
         result = self._client._request(
             "POST",
             f"/v1/sandboxes/{self.id}/execute",

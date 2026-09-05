@@ -115,6 +115,37 @@ class ProductionSessionTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return self.client.get("/v1/session").json()["csrf_token"]
 
+    def test_session_reads_return_one_stable_csrf_token(self) -> None:
+        login = self.client.post(
+            "/v1/dashboard/session", json={"api_key": self.key.secret}
+        ).json()
+        first = self.client.get("/v1/session").json()
+        second = self.client.get("/v1/session").json()
+
+        self.assertEqual(login["csrf_token"], first["csrf_token"])
+        self.assertEqual(first["csrf_token"], second["csrf_token"])
+        created = self.client.post(
+            "/v1/sandboxes",
+            json={"backend": "daytona", "timeout_secs": 60},
+            headers={"X-CSRF-Token": login["csrf_token"]},
+        )
+        self.assertEqual(created.status_code, 201)
+
+    def test_api_key_revoke_returns_an_empty_204_response(self) -> None:
+        headers = {"Authorization": f"Bearer {self.key.secret}"}
+        issued = self.client.post(
+            "/v1/api-keys",
+            json={"name": "Disposable", "scopes": ["sandboxes:read"]},
+            headers=headers,
+        ).json()
+
+        revoked = self.client.delete(
+            f"/v1/api-keys/{issued['id']}", headers=headers
+        )
+
+        self.assertEqual(revoked.status_code, 204)
+        self.assertEqual(revoked.content, b"")
+
     def test_http_only_session_csrf_security_headers_and_local_path(
         self,
     ) -> None:
@@ -234,6 +265,7 @@ class ProductionSessionTest(unittest.TestCase):
         self.assertEqual(len(first_rows), 1)
         self.assertEqual(len(second_rows), 1)
         self.assertNotEqual(first_rows[0]["id"], second_rows[0]["id"])
+        self.assertNotIn("x-next-cursor", second.headers)
         self.assertNotIn(other_sandbox.id, first.text + second.text)
         for kind in ("costs", "ledger"):
             exported = self.client.get(
@@ -617,7 +649,6 @@ class AlertRetentionAndExportTest(unittest.TestCase):
             allowed_gpu_types=None,
             max_sandbox_lifetime_secs=None,
         )
-        self.service.cost_summary(self.principal)
         self.service.check_provider_health(self.principal, "daytona")
         self.service.run_watchdog_once()
         items, _ = self.service.alert_history(
@@ -765,6 +796,20 @@ class AlertRetentionAndExportTest(unittest.TestCase):
         self.assertTrue(costs)
         self.assertIn("customer_delta_usd", ledger_columns)
         self.assertTrue(ledger)
+        provider_rows = [
+            row for row in ledger if row["kind"] == "provider_cost"
+        ]
+        customer_rows = [
+            row for row in ledger if row["kind"] == "customer_cost"
+        ]
+        self.assertTrue(provider_rows)
+        self.assertTrue(customer_rows)
+        self.assertTrue(
+            all(row["customer_delta_usd"] == "0" for row in provider_rows)
+        )
+        self.assertTrue(
+            all(row["provider_delta_usd"] == "0" for row in customer_rows)
+        )
 
 
 if __name__ == "__main__":

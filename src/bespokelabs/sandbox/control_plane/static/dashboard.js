@@ -64,7 +64,7 @@ function renderOverview() {
   const failed = state.sandboxes.filter((item) => item.status === "failed" && !item.running_at).length;
   const unreconciled = state.sandboxes.filter((item) => item.cost_state === "estimated").reduce((sum, item) => sum + Number(costById.get(item.id)?.provider_cost_usd || 0), 0);
   const nearing = activeItems.filter((item) => { const remaining = ttlRemaining(item); const ttl = Number(item.config?.timeout_secs); return remaining != null && remaining > 0 && remaining <= Math.min(900, ttl * 0.25); }).length;
-  elements.activeResources.textContent = String(activeItems.length); elements.failedLaunches.textContent = String(failed); elements.unreconciledSpend.textContent = formatCurrency(unreconciled); elements.ttlNearing.textContent = String(nearing);
+  elements.activeResources.textContent = String(activeItems.length); elements.failedLaunches.textContent = String(failed); elements.unreconciledSpend.textContent = state.session?.can_view_usage ? formatCurrency(unreconciled) : "Unavailable"; elements.ttlNearing.textContent = String(nearing);
 }
 
 function quotaRow(label, current, limit, formatter = String) {
@@ -188,12 +188,14 @@ async function loadDashboard() {
   clearError(); elements.refreshButton.disabled = true; elements.updatedAt.textContent = "Refreshing…"; if (!state.sandboxes.length) { elements.loadingState.hidden = false; elements.tableScroll.hidden = true; }
   try {
     const session = await api("/v1/session"); state.session = session; state.authenticated = true; state.csrfToken = session.csrf_token || "";
-    const requests = [api(costUrl("day")), api(costUrl("backend")), api(costUrl("sandbox")), api("/v1/sandboxes")];
+    const unavailableCosts = { items: [] };
+    const costRequests = session.can_view_usage ? [api(costUrl("day")), api(costUrl("backend")), api(costUrl("sandbox"))] : [Promise.resolve(unavailableCosts), Promise.resolve(unavailableCosts), Promise.resolve(unavailableCosts)];
+    const requests = [...costRequests, api("/v1/sandboxes")];
     const governanceRequests = [session.can_view_policy ? api("/v1/policy-summary") : Promise.resolve(null), session.can_view_providers ? api("/v1/providers") : Promise.resolve(null)];
     const activityRequests = [session.can_view_alerts ? api("/v1/alerts?limit=8") : Promise.resolve(null), session.can_view_audit ? api("/v1/audit?limit=8") : Promise.resolve(null)];
     const [daily, providers, sandboxCosts, sandboxes, policySummary, providerHealth, alerts, audit] = await Promise.all([...requests, ...governanceRequests, ...activityRequests]);
     state.sandboxes = sandboxes; state.costs = sandboxCosts.items || []; elements.permissionNotice.hidden = session.can_terminate; elements.accessSummary.textContent = `${session.role[0].toUpperCase()}${session.role.slice(1)} access · ${session.can_terminate ? "termination enabled" : "destructive controls hidden"}`;
-    elements.launchPanel.hidden = !session.can_create; renderProviderFilter(); renderOverview(); renderGovernance(policySummary, providerHealth); renderActivity(alerts, audit); renderSandboxes(); renderChart(daily.items || []); renderProviders(providers.items || []); setConnected(true); elements.updatedAt.textContent = `Updated ${new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date())}`;
+    elements.launchPanel.hidden = !session.can_create; renderProviderFilter(); renderOverview(); renderGovernance(policySummary, providerHealth); renderActivity(alerts, audit); renderSandboxes(); if (session.can_view_usage) { renderChart(daily.items || []); renderProviders(providers.items || []); } else { elements.spendChart.innerHTML = '<p class="chart-empty">Spend data requires usage access.</p>'; elements.providerList.innerHTML = '<p class="provider-empty">Provider spend requires usage access.</p>'; } setConnected(true); elements.updatedAt.textContent = `Updated ${new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date())}`;
   } catch (error) {
     if (error.status === 401 || error.status === 403) { if (state.localMode) { sessionStorage.removeItem("bespoke_dashboard_api_key"); state.apiKey = ""; } state.authenticated = false; state.csrfToken = ""; setConnected(false); if (state.localMode || error.status === 403) showError("Authentication failed or this identity lacks dashboard access."); }
     else { showError(error.message || "Could not load dashboard data."); elements.updatedAt.textContent = "Refresh failed"; }

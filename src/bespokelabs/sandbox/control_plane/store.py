@@ -9,7 +9,7 @@ import secrets
 import sqlite3
 import uuid
 from collections.abc import Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -381,11 +381,15 @@ _MIGRATIONS = (
             "CREATE INDEX ledger_entries_org_created_idx ON ledger_entries(organization_id, created_at)",
         ),
     ),
+    (
+        7,
+        ("ALTER TABLE orphan_cleanups ADD COLUMN claimed_at TEXT",),
+    ),
 )
 
 
 def _now() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _id(prefix: str) -> str:
@@ -401,7 +405,21 @@ def _normalize_expiration(value: str | None) -> str | None:
         raise ValueError("expires_at must be an ISO-8601 timestamp") from exc
     if parsed.tzinfo is None:
         raise ValueError("expires_at must include a timezone")
-    return parsed.astimezone(UTC).isoformat()
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
+def _parse_time_bound(value: str | None, name: str) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(
+            f"{value[:-1]}+00:00" if value.endswith("Z") else value
+        )
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{name} must include a timezone")
+    return parsed.astimezone(timezone.utc)
 
 
 class SQLiteStore:
@@ -565,7 +583,7 @@ class SQLiteStore:
         ).isoformat()
         session_id = _id("ses")
         token = "bss_" + secrets.token_urlsafe(32)
-        csrf_token = "csrf_" + secrets.token_urlsafe(24)
+        csrf_token = self._session_csrf_value(session_id)
         with self._connect() as connection:
             connection.execute(
                 """INSERT INTO web_sessions(
@@ -633,8 +651,9 @@ class SQLiteStore:
             row["csrf_digest"], self._digest(token)
         )
 
-    def rotate_session_csrf(self, session_id: str) -> str:
-        token = "csrf_" + secrets.token_urlsafe(24)
+    def session_csrf_token(self, session_id: str) -> str:
+        """Return the stable, pepper-derived token for an active session."""
+        token = self._session_csrf_value(session_id)
         with self._connect() as connection:
             cursor = connection.execute(
                 """UPDATE web_sessions SET csrf_digest=?
@@ -768,7 +787,9 @@ class SQLiteStore:
     def policy_summary(
         self, organization_id: str, *, timestamp: str | None = None
     ) -> dict:
-        when = datetime.fromisoformat(timestamp or _now()).astimezone(UTC)
+        when = datetime.fromisoformat(timestamp or _now()).astimezone(
+            timezone.utc
+        )
         policy = self.get_policy(organization_id)
         hour_start = when - timedelta(hours=1)
         day_start = when.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -1438,24 +1459,32 @@ class SQLiteStore:
         backend: str,
         provider_resource_id: str,
         observed_at: str,
+        claimed_at: str,
+        stale_before: str,
     ) -> bool:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
-                """SELECT status FROM orphan_cleanups
+                """SELECT status, claimed_at FROM orphan_cleanups
                    WHERE backend=? AND provider_resource_id=?""",
                 (backend, provider_resource_id),
             ).fetchone()
             if existing is not None:
-                if existing["status"] != "failed":
+                is_stale_claim = existing["status"] == "claimed" and (
+                    existing["claimed_at"] is None
+                    or existing["claimed_at"] < stale_before
+                )
+                if existing["status"] != "failed" and not is_stale_claim:
                     return False
                 connection.execute(
                     """UPDATE orphan_cleanups SET status='claimed',
-                       organization_id=?, observed_at=?, completed_at=NULL
+                       organization_id=?, observed_at=?, claimed_at=?,
+                       completed_at=NULL
                        WHERE backend=? AND provider_resource_id=?""",
                     (
                         organization_id,
                         observed_at,
+                        claimed_at,
                         backend,
                         provider_resource_id,
                     ),
@@ -1464,12 +1493,14 @@ class SQLiteStore:
             connection.execute(
                 """INSERT INTO orphan_cleanups(
                    backend, provider_resource_id, organization_id,
-                   status, observed_at) VALUES (?, ?, ?, 'claimed', ?)""",
+                   status, observed_at, claimed_at)
+                   VALUES (?, ?, ?, 'claimed', ?, ?)""",
                 (
                     backend,
                     provider_resource_id,
                     organization_id,
                     observed_at,
+                    claimed_at,
                 ),
             )
         return True
@@ -2114,14 +2145,18 @@ class SQLiteStore:
     ) -> list[CostSummary]:
         if group_by not in {"sandbox", "backend", "day"}:
             raise ValueError("group_by must be sandbox, backend, or day")
+        start_at = _parse_time_bound(start, "start")
+        end_at = _parse_time_bound(end, "end")
+        if start_at is not None and end_at is not None and start_at >= end_at:
+            raise ValueError("start must be before end")
         clauses = ["u.organization_id = ?"]
         params: list[str] = [organization_id]
-        if start:
+        if start_at is not None:
             clauses.append("u.created_at >= ?")
-            params.append(start)
-        if end:
+            params.append(start_at.isoformat())
+        if end_at is not None:
             clauses.append("u.created_at < ?")
-            params.append(end)
+            params.append(end_at.isoformat())
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
@@ -2145,14 +2180,55 @@ class SQLiteStore:
                 FROM lifecycle_ledger_entries l
                 JOIN sandboxes s ON s.id = l.sandbox_id
                 WHERE l.organization_id = ?
-                  AND (? IS NULL OR l.created_at >= ?)
-                  AND (? IS NULL OR l.created_at < ?)
                 """,
-                (organization_id, start, start, end, end),
+                (organization_id,),
             ).fetchall()
 
+        bounded_lifecycle_rows: list[dict[str, str]] = []
+        for source in lifecycle_rows:
+            row = dict(source)
+            quantity = Decimal(row["quantity"])
+            created_at = datetime.fromisoformat(row["created_at"])
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            else:
+                created_at = created_at.astimezone(timezone.utc)
+            if quantity > 0:
+                interval_end = created_at + timedelta(
+                    microseconds=int(quantity * Decimal(1_000_000))
+                )
+                overlap_start = max(
+                    value
+                    for value in (created_at, start_at)
+                    if value is not None
+                )
+                overlap_end = min(
+                    value
+                    for value in (interval_end, end_at)
+                    if value is not None
+                )
+                if overlap_start >= overlap_end:
+                    continue
+                overlap_seconds = Decimal(
+                    str((overlap_end - overlap_start).total_seconds())
+                )
+                ratio = overlap_seconds / quantity
+                row["created_at"] = overlap_start.isoformat()
+                row["quantity"] = str(overlap_seconds)
+                row["provider_cost_usd"] = str(
+                    Decimal(row["provider_cost_usd"]) * ratio
+                )
+                row["customer_cost_usd"] = str(
+                    Decimal(row["customer_cost_usd"]) * ratio
+                )
+            elif (start_at is not None and created_at < start_at) or (
+                end_at is not None and created_at >= end_at
+            ):
+                continue
+            bounded_lifecycle_rows.append(row)
+
         totals: dict[str, list[Decimal]] = {}
-        for row in [*rows, *lifecycle_rows]:
+        for row in [*rows, *bounded_lifecycle_rows]:
             if group_by == "sandbox":
                 key = row["sandbox_id"]
             elif group_by == "backend":
@@ -2241,8 +2317,10 @@ class SQLiteStore:
                    cost_state, created_at FROM (
                      SELECT id, organization_id, sandbox_id, kind,
                        usage_event_id AS reference_id, '0' AS runtime_seconds,
-                       amount_usd AS provider_delta_usd,
-                       amount_usd AS customer_delta_usd,
+                       CASE WHEN kind='provider_cost'
+                         THEN amount_usd ELSE '0' END AS provider_delta_usd,
+                       CASE WHEN kind='customer_cost'
+                         THEN amount_usd ELSE '0' END AS customer_delta_usd,
                        'execution' AS cost_state, created_at
                      FROM ledger_entries
                      UNION ALL
@@ -2273,6 +2351,14 @@ class SQLiteStore:
         return hmac.new(
             self._pepper, secret.encode(), hashlib.sha256
         ).hexdigest()
+
+    def _session_csrf_value(self, session_id: str) -> str:
+        digest = hmac.new(
+            self._pepper,
+            f"dashboard-csrf:{session_id}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        return f"csrf_{digest}"
 
     def _request_fingerprint(self, payload: dict) -> str:
         canonical = json.dumps(
@@ -2406,7 +2492,7 @@ class SQLiteStore:
                     current=active,
                     limit=policy.max_concurrent_sandboxes,
                 )
-        when = datetime.fromisoformat(timestamp).astimezone(UTC)
+        when = datetime.fromisoformat(timestamp).astimezone(timezone.utc)
         spend_windows = (
             (
                 "hourly_spend_limit_usd",

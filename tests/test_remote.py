@@ -106,6 +106,24 @@ class RemoteSandboxClientTest(unittest.TestCase):
         )
 
     @mock.patch("bespokelabs.sandbox.remote.urllib.request.urlopen")
+    def test_empty_idempotency_keys_are_rejected_locally(
+        self, urlopen: mock.MagicMock
+    ) -> None:
+        client = RemoteSandboxClient("https://sandbox.example", "key")
+
+        with self.assertRaisesRegex(ValueError, "1 to 255"):
+            client.create("daytona", idempotency_key="")
+
+        urlopen.return_value = FakeResponse(
+            {"id": "sbx_1", "backend": "daytona"}
+        )
+        sandbox = client.create("daytona", idempotency_key="create")
+        with self.assertRaisesRegex(ValueError, "1 to 255"):
+            sandbox.execute_code("print(1)", idempotency_key="")
+
+        self.assertEqual(urlopen.call_count, 1)
+
+    @mock.patch("bespokelabs.sandbox.remote.urllib.request.urlopen")
     def test_structured_provider_error_fields_are_exposed(
         self, urlopen: mock.MagicMock
     ) -> None:

@@ -89,19 +89,22 @@ dashboard smoke test. See `PHASE5_VERIFICATION.md` for the recorded evidence.
 ## Supervisor and reconciler operation
 
 The in-process supervisor scans durable sandbox state at the configured
-interval. It reclaims expired resources, retries recoverable stopped/failed
-cleanup, removes confirmed provider orphans, and evaluates configured alerts.
+interval. It reclaims expired or interrupted stopping resources, retries failed
+orphan deletions, removes confirmed provider orphans, and evaluates configured
+alerts.
 Its claims are durable and idempotent across restart. Actual cleanup after a
 restart still requires an injected provider terminator, and orphan detection
 requires an injected reconciler. Keep exactly one active supervisor per SQLite
 database.
 
 Reconciliation is provider-specific and is unavailable in the stock CLI.
-`GET /v1/reconciliation` reports tenant
-state; an authorized `POST /v1/reconciliation/{backend}` lists provider
-resources only when the deployment injected a reconciler, applies status/cost
-observations, detects missing resources, and queues orphan cleanup. Repeating
-an observation does not duplicate ledger cost.
+`GET /v1/reconciliation` reports tenant state; an authorized
+`POST /v1/reconciliation/{backend}` lists provider resources only when the
+deployment injected a reconciler, applies status and cost observations, detects
+missing resources, and reports resources not represented by tenant sandbox
+records. A later supervisor pass performs orphan cleanup only when both a
+reconciler and provider terminator are injected. Repeating an observation does
+not duplicate ledger cost.
 Schedule reconciliation at a frequency compatible with provider rate limits
 and billing freshness. Treat a missing checker or reconciler as `unchecked`,
 not healthy.
@@ -144,8 +147,9 @@ For `cleanup_status=unknown` or ambiguous creation, do not retry creation until
 provider inventory resolves whether a resource exists. Reconcile first; if a
 resource exists, terminate it with the provider identifier and confirm deletion
 before marking the incident resolved. For failed TTL cleanup, preserve the
-alert/audit trail, verify provider credentials and reachability, then allow the
-supervisor to retry or perform a scoped provider-side deletion.
+alert/audit trail, verify provider credentials and reachability, then perform a
+deliberate, scoped provider-side deletion. The current watchdog does not retry
+a sandbox row after termination has been recorded as failed.
 
 For an orphan alert, verify tenant/account ownership and the absence of a local
 sandbox record before deletion. Never bulk-delete using an unbounded provider

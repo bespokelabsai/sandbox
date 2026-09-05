@@ -7,7 +7,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -117,7 +117,7 @@ class ControlPlane:
         self._supervisor_stop = threading.Event()
         self._supervisor_thread: threading.Thread | None = None
         self._supervisor_owner = f"supervisor-{uuid.uuid4().hex}"
-        self._now = now or (lambda: datetime.now(UTC))
+        self._now = now or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
 
     def bootstrap_organization(
@@ -355,6 +355,16 @@ class ControlPlane:
         record = self.store.get_sandbox(principal.organization_id, sandbox_id)
         if record.status == "destroyed":
             return record
+        with self._lock:
+            runtime = self._runtimes.get(sandbox_id)
+        terminator = self._provider_terminators.get(record.backend)
+        if runtime is None and (
+            terminator is None or record.provider_resource_id is None
+        ):
+            raise ConflictError(
+                "sandbox runtime is not attached and provider termination "
+                "is not configured"
+            )
         stopping_at = self._now().isoformat()
         self.store.begin_termination(
             principal.organization_id,
@@ -363,13 +373,15 @@ class ControlPlane:
             expected_version=expected_version,
         )
         with self._lock:
-            runtime = self._runtimes.pop(sandbox_id, None)
-        if runtime is None:
-            raise ConflictError(
-                "sandbox runtime is not attached to this process"
-            )
+            if runtime is not None:
+                self._runtimes.pop(sandbox_id, None)
         try:
-            runtime.destroy()
+            if runtime is not None:
+                runtime.destroy()
+            else:
+                assert terminator is not None
+                assert record.provider_resource_id is not None
+                terminator(record.provider_resource_id)
         except Exception as exc:
             failed_at = self._now().isoformat()
             provider_error = normalize_provider_error(
@@ -404,7 +416,6 @@ class ControlPlane:
 
     def sandbox_detail(self, principal: Principal, sandbox_id: str) -> dict:
         self.require(principal, "sandboxes:read")
-        self.require(principal, "usage:read")
         self._accrue_active(principal)
         return self.store.sandbox_detail(principal.organization_id, sandbox_id)
 
@@ -706,6 +717,9 @@ class ControlPlane:
     def reconcile(self, principal: Principal, backend: str) -> dict:
         """Reconcile one tenant against a provider-filtered resource list."""
         self.require(principal, "providers:reconcile")
+        backend = backend.lower().strip()
+        if backend not in self._allowed_backends:
+            raise ValueError(f"backend is not enabled: {backend}")
         reconciler = self._provider_reconcilers.get(backend)
         if reconciler is None:
             raise ValueError(f"reconciliation is not configured: {backend}")
@@ -822,7 +836,8 @@ class ControlPlane:
             "total": len(records),
             "unreconciled": sum(r.cost_state == "estimated" for r in records),
             "provider_reported": sum(
-                r.cost_state == "provider_reported" for r in records
+                r.cost_state in {"provider_reported", "reconciled"}
+                for r in records
             ),
             "reconciled": sum(r.cost_state == "reconciled" for r in records),
             "missing": sum(r.provider_missing for r in records),
@@ -905,8 +920,15 @@ class ControlPlane:
     def _accrue_active(
         self, principal: Principal, *, timestamp: str | None = None
     ) -> None:
+        self._accrue_organization(
+            principal.organization_id, timestamp=timestamp
+        )
+
+    def _accrue_organization(
+        self, organization_id: str, *, timestamp: str | None = None
+    ) -> None:
         timestamp = timestamp or self._now().isoformat()
-        for record in self.store.list_sandboxes(principal.organization_id):
+        for record in self.store.list_sandboxes(organization_id):
             if (
                 record.status in {"creating", "running", "stopping"}
                 and record.cost_state == "estimated"
@@ -1035,6 +1057,8 @@ class ControlPlane:
                         backend=backend,
                         provider_resource_id=observation.provider_resource_id,
                         observed_at=observation.observed_at,
+                        claimed_at=timestamp,
+                        stale_before=stale_before,
                     ):
                         continue
                     try:
@@ -1078,6 +1102,7 @@ class ControlPlane:
         when = self._now()
         timestamp = when.isoformat()
         if configuration.budget_threshold_percent is not None:
+            self._accrue_organization(organization_id, timestamp=timestamp)
             summary = self.store.policy_summary(
                 organization_id, timestamp=timestamp
             )

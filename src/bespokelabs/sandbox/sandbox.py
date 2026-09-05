@@ -512,7 +512,13 @@ class Sandbox:
         return self
 
     def __exit__(self, *exc: object) -> None:
-        self.destroy()
+        # Context-manager cleanup remains best-effort for compatibility. Direct
+        # destroy() calls still surface provider failures so control planes can
+        # record an accurate cleanup state instead of reporting a leak as gone.
+        try:
+            self.destroy()
+        except Exception:
+            pass
 
     # -- Properties --------------------------------------------------------
 

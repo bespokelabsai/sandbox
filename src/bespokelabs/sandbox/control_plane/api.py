@@ -491,13 +491,14 @@ def create_app(
             "can_view_providers": principal.allows("providers:read"),
             "can_manage_providers": principal.allows("providers:write"),
             "can_create": principal.allows("sandboxes:create"),
+            "can_view_usage": principal.allows("usage:read"),
             "can_view_alerts": principal.allows("alerts:read"),
             "can_view_audit": principal.allows("audit:read"),
             "can_export": principal.allows("exports:read"),
             "auth_mode": "session" if session_id else "api_key",
         }
         if session_id:
-            result["csrf_token"] = control_plane.store.rotate_session_csrf(
+            result["csrf_token"] = control_plane.store.session_csrf_token(
                 session_id
             )
         return result
@@ -649,8 +650,9 @@ def create_app(
         writer.writerows(_spreadsheet_safe_csv_rows(columns, rows))
         headers = {
             "Content-Disposition": f'attachment; filename="bespoke-{kind}.csv"',
-            "X-Next-Cursor": encode_cursor(next_offset or 0) or "",
         }
+        if next_offset is not None:
+            headers["X-Next-Cursor"] = encode_cursor(next_offset)
         return Response(
             output.getvalue(),
             media_type="text/csv; charset=utf-8",
@@ -713,9 +715,10 @@ def create_app(
     def revoke_api_key(
         key_id: str,
         authorization: Annotated[str | None, Header()] = None,
-    ) -> None:
+    ) -> Response:
         principal = authenticate(authorization, "keys:write")
         control_plane.store.revoke_api_key(principal.organization_id, key_id)
+        return Response(status_code=204)
 
     @app.post("/v1/sandboxes", status_code=status.HTTP_201_CREATED)
     def create_sandbox(

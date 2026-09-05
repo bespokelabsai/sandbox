@@ -165,6 +165,9 @@ class LifecycleReconciliationTest(unittest.TestCase):
         )
         refreshed = service.get_sandbox(principal, sandbox.id)
         self.assertEqual(refreshed.cost_state, "reconciled")
+        reconciliation = service.reconciliation_summary(principal)
+        self.assertEqual(reconciliation["provider_reported"], 1)
+        self.assertEqual(reconciliation["reconciled"], 1)
         self.assertEqual(refreshed.pricing_source, "provider")
         self.assertEqual(
             refreshed.last_provider_observed_at, observed.isoformat()
@@ -253,6 +256,23 @@ class LifecycleReconciliationTest(unittest.TestCase):
         self.assertEqual(untouched.status, "running")
         self.assertEqual(reconciler.calls, [principal.organization_id] * 2)
 
+    def test_reconciliation_rejects_a_backend_outside_the_allowlist(
+        self,
+    ) -> None:
+        reconciler = _Reconciler()
+        service = ControlPlane(
+            self.store,
+            allowed_backends={"local"},
+            provider_reconcilers={"daytona": reconciler},
+        )
+        _, key = service.bootstrap_organization("Allowlist")
+        principal = self.store.authenticate(key.secret)
+
+        with self.assertRaisesRegex(ValueError, "backend is not enabled"):
+            service.reconcile(principal, " DAYTONA ")
+
+        self.assertEqual(reconciler.calls, [])
+
     def test_clock_reversal_clamps_billable_duration_to_zero(self) -> None:
         clock = _Clock(self.base, self.base, self.base - timedelta(seconds=1))
         service, principal = self._service(clock)
@@ -321,6 +341,11 @@ class LifecycleReconciliationTest(unittest.TestCase):
             start="2026-01-01T00:00:00+00:00",
             end="2026-01-02T00:00:00+00:00",
         )
+        clipped = service.cost_summary(
+            principal,
+            start="2026-01-01T23:45:00Z",
+            end="2026-01-02T00:15:00Z",
+        )
 
         self.assertEqual(
             [item["key"] for item in daily],
@@ -337,6 +362,12 @@ class LifecycleReconciliationTest(unittest.TestCase):
         )
         self.assertEqual(
             Decimal(bounded[0]["provider_cost_usd"]), Decimal("0.027000")
+        )
+        self.assertEqual(
+            Decimal(clipped[0]["runtime_seconds"]), Decimal("1800.0")
+        )
+        self.assertEqual(
+            Decimal(clipped[0]["provider_cost_usd"]), Decimal("0.027000")
         )
 
     def test_transitional_statuses_and_invalid_status_are_strict(self) -> None:

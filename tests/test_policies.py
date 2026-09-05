@@ -14,7 +14,10 @@ from pathlib import Path
 from bespokelabs.sandbox.control_plane.cli import (
     _provider_settings_from_environment,
 )
-from bespokelabs.sandbox.control_plane.errors import PolicyDeniedError
+from bespokelabs.sandbox.control_plane.errors import (
+    ConflictError,
+    PolicyDeniedError,
+)
 from bespokelabs.sandbox.control_plane.reconciliation import ProviderObservation
 from bespokelabs.sandbox.control_plane.service import ControlPlane
 from bespokelabs.sandbox.control_plane.store import SQLiteStore
@@ -279,6 +282,39 @@ class PolicyConcurrencyTest(unittest.TestCase):
 
 class SupervisorTest(unittest.TestCase):
 
+    def test_api_termination_does_not_claim_without_a_cleanup_adapter(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SQLiteStore(
+                Path(directory) / "terminate.db", key_pepper="terminate"
+            )
+            factory = PolicyFactory()
+            service = ControlPlane(
+                store,
+                sandbox_factory=factory,
+                allowed_backends={"daytona"},
+                supervision_interval_secs=0,
+            )
+            _, key = service.bootstrap_organization("Terminate org")
+            principal = store.authenticate(key.secret)
+            created = service.create_sandbox(principal, "daytona", {})
+            service._runtimes.clear()
+
+            with self.assertRaises(ConflictError):
+                service.destroy_sandbox(principal, created.id)
+
+            self.assertEqual(
+                store.get_sandbox(principal.organization_id, created.id).status,
+                "running",
+            )
+            deleted: list[str] = []
+            service._provider_terminators["daytona"] = deleted.append
+            destroyed = service.destroy_sandbox(principal, created.id)
+            self.assertEqual(deleted, [created.provider_resource_id])
+            self.assertEqual(destroyed.status, "destroyed")
+            service.close()
+
     def test_restart_supervisor_terminates_expired_resource_once(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "restart.db"
@@ -476,6 +512,57 @@ class SupervisorTest(unittest.TestCase):
             self.assertEqual(row, (org["id"], "deleted"))
             self.assertNotEqual(row[0], other["id"])
             service.close()
+
+    def test_stale_orphan_claim_is_recovered_after_process_loss(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SQLiteStore(
+                Path(directory) / "orphan-crash.db", key_pepper="orphan-crash"
+            )
+            clock = MutableClock(datetime(2026, 9, 4, tzinfo=UTC))
+            org, _ = ControlPlane(
+                store, supervision_interval_secs=0
+            ).bootstrap_organization("Orphan crash org")
+            reconciler = FakeReconciler()
+            reconciler.by_org[org["id"]] = [
+                ProviderObservation(
+                    "orphan-crash",
+                    "resource-after-crash",
+                    "running",
+                    clock.value.isoformat(),
+                )
+            ]
+
+            def crash(_: str) -> None:
+                raise SimulatedProcessCrash
+
+            interrupted = ControlPlane(
+                store,
+                allowed_backends={"daytona"},
+                provider_reconcilers={"daytona": reconciler},
+                provider_terminators={"daytona": crash},
+                now=clock,
+                supervision_interval_secs=0,
+            )
+            with self.assertRaises(SimulatedProcessCrash):
+                interrupted.run_watchdog_once()
+
+            deleted: list[str] = []
+            restarted = ControlPlane(
+                store,
+                allowed_backends={"daytona"},
+                provider_reconcilers={"daytona": reconciler},
+                provider_terminators={"daytona": deleted.append},
+                now=clock,
+                supervision_interval_secs=0,
+            )
+            immediate = restarted.run_watchdog_once()
+            clock.value += timedelta(seconds=61)
+            recovered = restarted.run_watchdog_once()
+
+            self.assertEqual(immediate["orphans_deleted"], 0)
+            self.assertEqual(recovered["orphans_deleted"], 1)
+            self.assertEqual(deleted, ["resource-after-crash"])
+            restarted.close()
 
 
 @unittest.skipIf(TestClient is None, "server dependencies are not installed")
