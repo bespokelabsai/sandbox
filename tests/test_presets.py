@@ -12,11 +12,20 @@ from bespokelabs.sandbox.presets import (
 )
 from bespokelabs.sandbox.types import SandboxResult
 
-BUILT_IN_PRESETS = {"claude-code", "claude-code-codex", "codex"}
+BUILT_IN_PRESETS = {"claude-code", "claude-code-codex", "codex", "opencode"}
 TENSORLAKE_NPM_PREFIX = "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g"
 
 
 class PresetTests(unittest.TestCase):
+
+    def test_opencode_installs_on_all_backends(self) -> None:
+        preset = get_preset("opencode")
+        self.assertIsNone(preset.image)
+        self.assertEqual(preset.setup_commands, ["npm install -g opencode-ai"])
+        self.assertEqual(
+            preset.backend_setup_commands["tensorlake"],
+            [f"{TENSORLAKE_NPM_PREFIX} opencode-ai"],
+        )
 
     def test_builtin_presets_are_limited_to_agent_clis(self) -> None:
         self.assertEqual(set(PRESETS), BUILT_IN_PRESETS)

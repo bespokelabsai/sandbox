@@ -91,6 +91,24 @@ def _tensorlake_npm_install(packages: str) -> str:
 
 register_preset(
     SandboxPreset(
+        name="opencode",
+        description="Sandbox with OpenCode CLI installed (including GLM support)",
+        setup_commands=["npm install -g opencode-ai"],
+        backend_setup_commands={
+            "docker": [
+                "command -v npm >/dev/null 2>&1 || "
+                "(apt-get update && apt-get install -y nodejs npm git)",
+                "npm install -g opencode-ai",
+            ],
+            "tensorlake": [_tensorlake_npm_install("opencode-ai")],
+        },
+        memory_mb=2048,
+        timeout_secs=1800,
+    )
+)
+
+register_preset(
+    SandboxPreset(
         name="claude-code",
         description="Sandbox with Claude Code (Anthropic CLI) installed",
         image=f"{IMAGE_REGISTRY}/claude-code:{PRESET_IMAGE_TAG}",

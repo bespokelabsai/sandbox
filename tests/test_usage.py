@@ -3,11 +3,19 @@ from __future__ import annotations
 import json
 import unittest
 
-from bespokelabs.sandbox import AgentRunResult, Sandbox, Usage, pricing
+from bespokelabs.sandbox import (
+    AgentRunResult,
+    AsyncSandbox,
+    Sandbox,
+    Usage,
+    pricing,
+)
 from bespokelabs.sandbox._usage import (
     parse_claude_result,
     parse_claude_usage,
+    parse_opencode_result,
     result_text,
+    usage_from_result,
 )
 from bespokelabs.sandbox.types import SandboxResult
 
@@ -114,6 +122,106 @@ class UsageParsingTests(unittest.TestCase):
         )
 
 
+def _opencode_json() -> str:
+    return "\n".join(
+        json.dumps(event)
+        for event in [
+            {"type": "step_start", "part": {"id": "start"}},
+            {"type": "text", "part": {"id": "text", "text": "all good"}},
+            {
+                "type": "step_finish",
+                "part": {
+                    "id": "step1",
+                    "cost": 0.01,
+                    "tokens": {
+                        "input": 100,
+                        "output": 20,
+                        "reasoning": 5,
+                        "cache": {"read": 10, "write": 3},
+                    },
+                },
+            },
+            {
+                "type": "step_finish",
+                "part": {
+                    "id": "step2",
+                    "cost": 0.02,
+                    "tokens": {"input": 200, "output": 30},
+                },
+            },
+        ]
+    )
+
+
+class OpenCodeParsingTests(unittest.TestCase):
+
+    def test_steps_are_summed_and_duplicate_updates_not_billed_twice(self):
+        stream = _opencode_json()
+        record = parse_opencode_result(stream + "\n" + stream)
+        self.assertEqual(result_text(record), "all good")
+        usage = usage_from_result(record)
+        self.assertEqual(usage.input_tokens, 300)
+        self.assertEqual(usage.output_tokens, 55)
+        self.assertEqual(usage.cache_read_tokens, 10)
+        self.assertEqual(usage.cache_creation_tokens, 3)
+        self.assertAlmostEqual(usage.llm_cost_usd, 0.03)
+
+    def test_malformed_events_and_partial_output(self):
+        stream = "\n".join(
+            [
+                "install log",
+                "null",
+                "[]",
+                "{",
+                '{"type":"step_finish","part":null}',
+                '{"type":"text","part":{"text":123}}',
+                '{"type":"step_finish","part":{"tokens":{"input":null,"cache":[]}}}',
+                _opencode_json(),
+            ]
+        )
+        self.assertEqual(result_text(parse_opencode_result(stream)), "all good")
+        self.assertIsNone(parse_opencode_result("unstructured output"))
+
+    def test_error_events_are_preserved_with_partial_usage(self):
+        error = {"type": "error", "error": {"name": "APIError"}}
+        record = parse_opencode_result(
+            _opencode_json() + "\n" + json.dumps(error)
+        )
+        self.assertEqual(record["events"][-1], error)
+        self.assertAlmostEqual(usage_from_result(record).llm_cost_usd, 0.03)
+
+
+class AsyncOpenCodeTests(unittest.IsolatedAsyncioTestCase):
+
+    async def test_async_forwards_harness_and_model(self):
+        from bespokelabs.sandbox.types import SandboxConfig
+
+        session = _RecordingSession(_opencode_json())
+        sandbox = Sandbox._from_session(
+            "local", session, SandboxConfig(backend="local")
+        )
+        async with AsyncSandbox(sandbox) as sb:
+            result = await sb.run_agent(
+                "hi", harness="opencode", model="zai/glm-4.7"
+            )
+        self.assertEqual(result.text, "all good")
+        self.assertEqual(
+            session.calls[0],
+            (
+                "opencode",
+                [
+                    "run",
+                    "--format",
+                    "json",
+                    "--model",
+                    "zai/glm-4.7",
+                    "--",
+                    "hi",
+                ],
+            ),
+        )
+
+
 class UsageArithmeticTests(unittest.TestCase):
 
     def test_add_sums_every_field(self) -> None:
@@ -170,6 +278,63 @@ class _RecordingSession:
 
 
 class RunAgentTests(unittest.TestCase):
+
+    def test_opencode_command_model_resume_and_usage(self):
+        sb, session = self._sandbox(_opencode_json(), exit_code=1)
+        with sb:
+            result = sb.run_agent(
+                "--review 'quoted' $text",
+                harness="opencode",
+                model="zai-coding-plan/glm-4.7",
+                resume=True,
+                command="/opt/bin/opencode",
+                extra_args=["--agent", "build"],
+            )
+            sb.run_agent("again", harness="opencode")
+        self.assertEqual(
+            session.calls[0],
+            (
+                "/opt/bin/opencode",
+                [
+                    "run",
+                    "--format",
+                    "json",
+                    "-c",
+                    "--model",
+                    "zai-coding-plan/glm-4.7",
+                    "--agent",
+                    "build",
+                    "--",
+                    "--review 'quoted' $text",
+                ],
+            ),
+        )
+        self.assertEqual(session.calls[1][0], "opencode")
+        self.assertEqual(result.text, "all good")
+        self.assertEqual(result.exit_code, 1)
+        self.assertEqual(sb.usage.input_tokens, 600)
+
+    def test_invalid_harness_and_format_fail_before_execution(self):
+        sb, session = self._sandbox("")
+        with sb:
+            with self.assertRaises(ValueError):
+                sb.run_agent("hi", harness="unknown")
+            with self.assertRaises(ValueError):
+                sb.run_agent(
+                    "hi", harness="opencode", output_format="stream-json"
+                )
+        self.assertEqual(session.calls, [])
+
+    def test_opencode_text_format(self):
+        sb, session = self._sandbox("plain answer")
+        with sb:
+            result = sb.run_agent(
+                "hi", harness="opencode", output_format="text"
+            )
+        self.assertEqual(result.text, "plain answer")
+        self.assertEqual(
+            session.calls[0][1], ["run", "--format", "default", "--", "hi"]
+        )
 
     def _sandbox(
         self, stdout: str, *, exit_code: int = 0
