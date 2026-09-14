@@ -13,14 +13,32 @@
 
 Just like [OpenRouter](https://openrouter.ai) gives you a single API across LLM providers, `bespokelabs-sandbox` gives you a unified interface across sandbox providers. Write your code once, swap backends with a single parameter.
 
+Use `Sandbox` / `SandboxClient` when your application owns provider credentials,
+or `RemoteSandboxClient` when it connects to a control plane that you operate.
+The direct SDK provides execution, files, workspaces, agent helpers, and session
+resume. The optional server adds organization keys, policies, metering, and an
+operations dashboard.
+
+**Contents:** [Install](#install) · [Quickstart](#quickstart) ·
+[Hosted control plane](#hosted-control-plane) · [API reference](#api-reference) ·
+[Feature support](#feature-support-matrix) · [Examples](#examples) ·
+[Development](#development)
+
 ## Why?
 
-- **No lock-in** — Your code works across all backends. Switch providers without rewriting a single line.
+- **Common interface** — Use the same execution and file APIs across nine backends, with provider-specific configuration where needed.
 - **Easily move between providers** — If one provider has an outage or capacity issue, change one string and keep running.
 - **Cost tracking** — Track Claude Code token usage, estimated sandbox compute cost, and compare backend pricing.
-- **Automatic scheduling to lowest cost provider** — Let the library route your workloads to the cheapest available backend. *(coming soon)*
+- **Optional hosted access** — Operate multiple providers behind organization API keys, with lifecycle costs, policies, audit history, and a dashboard.
+
+Backend selection is explicit. Automatic cheapest-provider routing and automatic
+failover are not implemented; the benchmark example helps compare providers.
 
 ## Install
+
+The core SDK declares Python **3.10+**. Use **Python 3.11+** for the control
+plane and its tests: the current server implementation imports `datetime.UTC`.
+The only required core dependency is Pydantic; provider SDKs are optional.
 
 ```bash
 pip install bespokelabs-sandbox
@@ -29,14 +47,18 @@ pip install bespokelabs-sandbox
 With a specific backend:
 
 ```bash
-pip install bespokelabs-sandbox[docker]
-pip install bespokelabs-sandbox[daytona]
-pip install bespokelabs-sandbox[tensorlake]
-pip install bespokelabs-sandbox[modal]
-pip install bespokelabs-sandbox[e2b]
-pip install bespokelabs-sandbox[ray]
-pip install bespokelabs-sandbox[all]
+pip install 'bespokelabs-sandbox[docker]'
+pip install 'bespokelabs-sandbox[daytona]'
+pip install 'bespokelabs-sandbox[tensorlake]'
+pip install 'bespokelabs-sandbox[modal]'
+pip install 'bespokelabs-sandbox[e2b]'
+pip install 'bespokelabs-sandbox[ray]'
+pip install 'bespokelabs-sandbox[all]'
 ```
+
+`[all]` installs all optional provider SDKs, but does not include `[server]`
+or `[dev]`. Install `'bespokelabs-sandbox[server,e2b]'`, for example, to run
+the API with E2B support. The remote HTTP client needs only the core package.
 
 The RunPod backend has no Python extra; it uses the system OpenSSH client.
 The Safehouse backend also has no Python extra. Install its CLI separately on
@@ -50,7 +72,8 @@ brew install eugene1g/safehouse/agent-safehouse
 
 ### Local
 
-No API keys, no cloud accounts. Just works.
+Local execution needs no provider account. Docker, Ray, and Safehouse have
+the runtime requirements listed below.
 
 | Backend | Extra | Requires |
 |---|---|---|
@@ -64,12 +87,18 @@ No API keys, no cloud accounts. Just works.
 | Backend | Extra | Auth |
 |---|---|---|
 | [Daytona](https://www.daytona.io) | `[daytona]` | `DAYTONA_API_KEY` |
-| [Tensorlake](https://tensorlake.ai) | `[tensorlake]` | `tl login` |
+| [Tensorlake](https://tensorlake.ai) | `[tensorlake]` | `TENSORLAKE_API_KEY` or `tl login` |
 | [Modal](https://modal.com) | `[modal]` | `MODAL_TOKEN_ID` + `MODAL_TOKEN_SECRET` |
 | [RunPod](https://www.runpod.io) | _(none)_ | `RUNPOD_API_KEY` + registered SSH key |
 | [E2B](https://e2b.dev) | `[e2b]` | `E2B_API_KEY` |
 
 You only need to install the backend you use. The others are lazily imported.
+
+Local and Ray execute subprocesses on the host or Ray worker and inherit its
+environment. Their workspace path rewriting is a convenience, not an OS
+security boundary. Safehouse wraps subprocesses with its macOS policy, while
+its file helpers still access the host directly. Use the isolation properties
+of your selected backend when deciding which workloads to run.
 
 ## Quickstart
 
@@ -115,6 +144,11 @@ The optional control plane lets a customer use one Bespoke API key across all
 of the providers you operate. Provider credentials remain on the server, and
 every execution is automatically attributed to the customer's organization
 and sandbox.
+
+This is a self-hosted service shipped in the repository. Run **one API process
+per SQLite database**: live sandbox handles are held in that process, and
+execution cannot resume automatically after a restart. Graceful shutdown
+attempts to destroy the process's attached sandboxes.
 
 ### 1. Install the server and provider
 
@@ -162,7 +196,10 @@ curl http://127.0.0.1:8000/healthz
 identity. Keep both values unchanged across restarts. Changing the pepper or
 pointing at another database makes previously issued product keys invalid.
 The backend allowlist is also read at startup, so restart the server after
-changing `BESPOKE_ALLOWED_BACKENDS`.
+changing `BESPOKE_ALLOWED_BACKENDS`. If omitted, all registered backends are
+allowed; set an explicit list for your deployment. `HOST` and `PORT` default to
+`127.0.0.1` and `8000`. The CLI serves HTTP; terminate HTTPS at a reverse proxy
+for the secure dashboard cookie.
 
 Provider configuration is server-owned. The control plane reads the standard
 Daytona, E2B, Modal, Runpod, and Tensorlake credential variables into memory;
@@ -238,10 +275,26 @@ costs = client.costs(group_by="backend")
 print(costs)
 ```
 
-The context manager destroys each sandbox automatically. Reusing an
-`idempotency_key` on either creation or execution returns the original logical
-operation without creating, running, or billing it twice. Reusing a creation
-key with a different request is rejected.
+The context manager requests sandbox destruction on exit. Creation keys are
+scoped to an organization: the same key and payload return the existing record,
+including its current status, while a different payload is rejected. Execution
+keys are scoped to an organization and sandbox. A completed execution can
+return its cached response while the runtime remains attached and running;
+an in-progress or failed execution returns a conflict. Execution payloads are
+not compared, so use a new key for each distinct command and reuse it only to
+retry that command. The client does not automatically retry HTTP requests.
+
+`RemoteSandboxClient(..., timeout_secs=60)` sets the HTTP request timeout;
+`client.create(..., timeout_secs=60)` sets the sandbox timeout. Allow enough
+HTTP time for provider creation. A client timeout does not cancel server work.
+
+The remote surface currently supports creation, inventory (`list` / `get`),
+code/command execution, destruction, costs, and reconciliation. It does not
+expose the direct SDK's file transfers, `Manifest`, `backend_options`, agent
+helpers, structured `return_type`, snapshot creation, or session resume. See the
+[API contract](docs/CONTROL_PLANE_API.md) for the remaining HTTP endpoints.
+Cost amounts and durations arrive as decimal strings; `group_by` accepts
+`"sandbox"`, `"backend"`, or `"day"`.
 
 Provider failures expose a stable error contract in both HTTP responses and
 `RemoteSandboxError`: `code`, `backend`, `op`, `retryable`, `outcome`, and a
@@ -282,10 +335,13 @@ that made the request. `GET /v1/policy-summary` returns current quota/spend and
 recent denials. Redacted provider health is available from `GET /v1/providers`
 and `POST /v1/providers/{backend}/health-check`.
 
-The control-plane supervisor terminates expired sandboxes even when the client
-disconnects. Its durable claim state is safe across process restarts, and
-configured provider terminators can clean up resources whose in-memory runtime
-was lost. Reconciliation watchdogs also remove provider resources that do not
+An explicit creation `timeout_secs` also sets the control plane's `expires_at`
+on every backend, independently of the provider's own timeout semantics. Omitted
+values do not create a supervisor deadline, even when a preset supplies a
+recommended timeout. The control-plane supervisor terminates expired sandboxes
+even when the client disconnects. Its durable claim state is safe across process
+restarts, and configured provider terminators can clean up resources whose
+in-memory runtime was lost. Reconciliation watchdogs also remove provider resources that do not
 belong to any recorded sandbox, with durable idempotency so a confirmed cleanup
 is not repeated. Set `BESPOKE_SUPERVISION_INTERVAL_SECS` to tune the scan
 interval. These restart-recovery and reconciliation behaviors require injected
@@ -294,9 +350,11 @@ terminator/reconciler adapters; the stock CLI does not supply them.
 ### 5. Inspect usage in the dashboard
 
 Open [`http://127.0.0.1:8000/dashboard`](http://127.0.0.1:8000/dashboard) and
-enter the `bsk_live_...` product key. The initial organization key has every
-scope. A read-only dashboard key needs both `usage:read` and
-`sandboxes:read`.
+enter the `bsk_live_...` product key. For this plain-HTTP loopback example,
+set `BESPOKE_SESSION_COOKIE_SECURE=0` before starting the server so the browser
+can send its session cookie. Keep the default `1` when serving over HTTPS.
+The initial organization key has every scope. A read-only dashboard key needs
+both `usage:read` and `sandboxes:read`.
 
 The dashboard provides:
 
@@ -304,14 +362,17 @@ The dashboard provides:
   and resources nearing their TTL;
 - budget/quota progress, backend/GPU/lifetime policy, provider health, and
   recent policy denials when the key has the corresponding read scopes;
-- status, provider, and creation-date filtering with pagination;
+- launches for keys with `sandboxes:create` (choose an enabled backend and
+  clear the form's `dashboard-cpu` preset default unless your deployment has
+  registered that custom preset);
+- status, provider, and creation-date filtering with client-side pagination;
 - creator key, provider resource, compute/GPU, rate, age/TTL, cleanup, and
   reconciliation state for every sandbox;
 - a detail view for lifecycle, attempts, executions, errors, cost, and provider
   observations;
 - confirmed, revision-safe termination for keys with `sandboxes:terminate`;
   legacy `sandboxes:write` keys remain compatible; and
-- automatic refresh while the tab is visible, plus manual refresh.
+- automatic refresh every 15 seconds while the tab is visible, plus manual refresh.
 
 The production dashboard exchanges the product key for an expiring, HTTP-only,
 Secure, SameSite=Strict cookie and never stores that key in browser storage.
@@ -325,8 +386,12 @@ cloud backend to exercise spend counters.
 
 The Activity view shows durable alerts and append-only audit history. Operators
 with `exports:read` can download paginated CSV pages for usage, lifecycle costs,
-and ledger entries. Alert thresholds and retention periods are tenant-owned and
-available through the API.
+and ledger entries. Dashboard export buttons download the first page of up to
+500 rows; full exports require following the HTTP `X-Next-Cursor` header as
+described in the [API contract](docs/CONTROL_PLANE_API.md#pagination-and-csv).
+Alert thresholds and retention periods are tenant-owned and available through
+the API. Retention defaults to 90 days for operational history and 365 days for
+audit; an explicit retention request preserves usage and financial ledgers.
 
 ### Security and deployment notes
 
@@ -337,7 +402,7 @@ uses `usage:read`, `policies:read`, `policies:write`, `providers:read`, and
 `providers:write`; reconciliation uses `providers:reconcile`; and key issuance
 uses `keys:write`. Operational access uses `alerts:read`, `alerts:write`,
 `audit:read`, `exports:read`, `retention:read`, and `retention:write`. The legacy
-`sandboxes:write` scope grants the four sandbox write operations and provider
+`sandboxes:write` scope grants create, execute, terminate, and provider
 reconciliation for compatibility. Runtime events and provider/customer costs
 are written to an idempotent ledger. All responses carry a restrictive content
 security policy and browser security headers. See the
@@ -371,20 +436,19 @@ Common errors:
 from bespokelabs.sandbox import Sandbox
 
 sb = Sandbox(
-    backend,              # "local" | "safehouse" | "docker" | "ray" | "daytona" | "tensorlake" | "modal" | "runpod" | "e2b"
-    *,
+    "local",              # "local" | "safehouse" | "docker" | "ray" | "daytona" | "tensorlake" | "modal" | "runpod" | "e2b"
     preset=None,          # Preset name or SandboxPreset object
     cpu=1.0,              # vCPUs (Tensorlake, Modal, Docker, Daytona, RunPod)
     memory_mb=1024,       # RAM in MB (Tensorlake, Modal, Docker, Daytona, RunPod)
     disk_mb=None,         # Disk in MB (Daytona, RunPod)
     gpu=None,             # GPU type/count (Modal, RunPod)
-    timeout_secs=600,     # Max lifetime / subprocess timeout
-    image=None,           # Container image (Docker, Modal, Daytona, RunPod)
+    timeout_secs=None,    # Omitted: preset default, otherwise 600 seconds
+    image=None,           # OCI image, or Tensorlake project image name
     template=None,        # Template ID (E2B, RunPod)
     env_vars=None,        # dict of environment variables
-    allow_internet=True,  # Network access (Docker, Tensorlake, Daytona)
+    allow_internet=True,  # Mapped by Docker and Tensorlake; rejected if false on RunPod
     app_name=None,        # App name (Modal)
-    snapshot_id=None,     # Restore from snapshot (Tensorlake, Modal)
+    snapshot_id=None,     # Restore from snapshot (Tensorlake, Modal, Daytona)
     workdir=None,         # Sandbox root or command working directory
     backend_options=None, # dict merged into the backend's native create call
     files=None,           # {path: bytes|str} written into the sandbox on create
@@ -429,8 +493,10 @@ templates must run an SSH daemon on port 22. Add the matching public key to the
 RunPod account before creating a sandbox. `ssh_private_key_path` is optional
 when the key is already discoverable by OpenSSH.
 
-`timeout_secs` is a command timeout on Local, Ray, and RunPod; a sandbox
-timeout on E2B and Modal; and on Daytona a wall-clock `ttl_minutes` deadline.
+`timeout_secs` is a command timeout on Local, Safehouse, Docker, Ray, and
+RunPod. E2B and Modal pass it as the provider sandbox timeout; Tensorlake passes
+it to `create_and_connect`. Daytona maps an explicit value to a wall-clock
+`ttl_minutes` deadline, rounded up to at least one minute.
 RunPod creation has a separate 10-minute default readiness timeout, adjustable
 with `backend_options={"create_timeout_secs": ...}`. Daytona
 destroys the sandbox when that deadline elapses in whatever state it is in,
@@ -455,7 +521,15 @@ print(result.stderr)     # ""
 print(result.exit_code)  # 0
 ```
 
-`language` defaults to `"python"`. Daytona also supports `"typescript"`, `"javascript"`, `"ruby"`, and `"go"`. Safehouse, Docker, Tensorlake, Modal, Local, and Ray accept any installed binary name.
+`language` defaults to `"python"`. The Daytona and E2B adapters ignore this
+argument and call their Python code endpoints. Other adapters invoke an
+installed interpreter as `<language> -c <code>`; for runtimes with different
+flags, use `execute_command` explicitly.
+
+By default, inspect `exit_code` on the returned `SandboxResult`; a nonzero
+exit is not uniformly converted into an exception. Local, Safehouse, Docker,
+and Ray return exit code `124` on execution timeout. Provider/transport
+failures can instead raise `SandboxError` subclasses.
 
 ### Running Shell Commands
 
@@ -463,6 +537,37 @@ print(result.exit_code)  # 0
 result = sb.execute_command("ls -la /tmp")
 result = sb.execute_command("grep", args=["-r", "TODO", "/app"])
 ```
+
+### Structured output
+
+Pass `return_type` to `execute_code` or `execute_command` to parse stdout into
+a Pydantic model, dataclass, or class accepting keyword arguments:
+
+```python
+from pydantic import BaseModel
+from bespokelabs.sandbox import Sandbox
+
+class Stats(BaseModel):
+    count: int
+    mean: float
+
+with Sandbox("local") as sb:
+    stats = sb.execute_code(
+        'import json; print(json.dumps(dict(count=3, mean=2.0)))',
+        return_type=Stats,
+    )
+    print(stats.count, stats.mean)
+
+# Parse existing text, including a downloaded file's decoded contents.
+stats = Sandbox.parse_as('{"count": 3, "mean": 2.0}', Stats)
+```
+
+Parsing accepts JSON objects, including objects in Markdown fences or
+surrounding text. It raises `CommandFailedError` if execution exited nonzero,
+and `SandboxExecutionError` if no object can be parsed or constructed.
+`json_schema(Stats)` generates a prompt instruction; for command calls,
+`inject_schema=True` appends that instruction to the last item in `args` when
+`return_type` is supplied. These helpers do not force the command to emit JSON.
 
 ### File Operations
 
@@ -489,9 +594,18 @@ sb.download_dir("/workspace/output", "./results")
 ```
 
 > Directory transfer is built on the single-file primitives above, so it works
-> on every backend. To seed a tree *before* the sandbox boots (e.g. so preset
-> setup sees it), use `build_files_map(local, remote)` with `Sandbox(files=...)`.
+> on every backend with the required shell tools. To seed a tree during
+> creation, use `build_files_map(local, remote)` with
+> `Sandbox(files=...)`, or a `Manifest` containing `LocalDir`.
 > See [`examples/move_files_into_sandbox.py`](examples/move_files_into_sandbox.py).
+
+Directory methods return the number of transferred files. Uploads skip symlinks
+and empty directories. `method="auto"` uses tar when available, otherwise
+`"per_file"`; the per-file download fallback does not preserve executable bits.
+`build_files_map` and `files=` carry contents only. Some provider file APIs
+require parent directories to exist, so create them before writing nested paths.
+On macOS, `COPYFILE_DISABLE=1` avoids AppleDouble metadata files in local tar
+downloads.
 
 ### Declarative workspaces
 
@@ -512,16 +626,20 @@ with Sandbox("daytona", workspace=Manifest(entries={
     ...
 ```
 
-Entries materialize in insertion order, so a later one overlays an earlier one.
+Default creation order is `git_repo` clone → `files` → `workspace` entries →
+preset setup (when needed). OpenCode opts into setup before workspace
+materialization so npm and Git are ready before cloning. All of this happens after the provider resource exists;
+setup/materialization failure triggers a cleanup attempt. Entries materialize
+in insertion order, so a later one overlays an earlier one.
 `GitRepo` clones, `LocalDir` / `LocalFile` upload (preserving the executable
 bit), and `File` writes in-memory content. Subclass `WorkspaceEntry` for custom
 sources, or call `manifest.apply(sb)` on a live sandbox.
 
 ### Errors
 
-Every failure is a `SandboxError` subclass carrying a machine-readable `code`,
-the `backend` and `op` in flight, a `retryable` flag, and a `context` dict — so
-you can branch on it instead of parsing message strings:
+SDK operation errors use `SandboxError` subclasses carrying a machine-readable
+`code`, the `backend` and `op` when supplied, a `retryable` flag, `outcome`, and
+a `context` dict. Branch on these fields instead of parsing message strings:
 
 ```python
 from bespokelabs.sandbox import Sandbox, SandboxError
@@ -530,15 +648,22 @@ try:
     with Sandbox("daytona") as sb:
         sb.execute_command("…")
 except SandboxError as e:
-    if e.retryable:        # transient (timeout / connection) — back off and retry
-        ...
-    print(e.code, e.backend, e.op, e.context)
+    print(e.code, e.backend, e.op, e.retryable, e.outcome, e.context)
+    # Decide whether retrying this operation is safe before repeating it.
 ```
 
 Subtypes include `SandboxConfigurationError`, `SandboxCreationError`,
 `CommandFailedError` (with `exit_code` / `stdout` / `stderr`),
 `SandboxTimeoutError` and `SandboxConnectionError` (both `retryable`),
-`WorkspaceError`, `BackendNotInstalledError`, and `FeatureNotSupportedError`.
+`SandboxAuthenticationError`, `SandboxNotFoundError`, `WorkspaceError`,
+`BackendNotInstalledError`, and `FeatureNotSupportedError`. Invalid helper
+arguments can still raise standard Python exceptions, such as `KeyError` for
+an unknown preset. `RemoteSandboxError` is a separate HTTP-client exception
+and does not inherit from `SandboxError`.
+
+A retryable transport failure alone does not prove that repeating a create or
+command is safe. Check `outcome` and cleanup state: `"unknown"` can mean the
+provider performed the operation but its response was lost.
 
 ### Agent-ready sandboxes
 
@@ -563,7 +688,7 @@ with Sandbox(
     agent = sb.agent(AgentSpec.inside(
         name="codex",
         command=["codex", "exec"],
-        cwd="/sandbox",
+        cwd="sandbox",
     ))
 
     result = agent.run("Run the eval suite and summarize failures")
@@ -609,9 +734,16 @@ with Sandbox("docker") as sb:
     print(tools.shell("cat", ["/workspace/input.txt"]).stdout)
 ```
 
-The generic context currently exposes `shell`, `files`, and `patch` operations.
-This keeps basic evaluation and inference usage stable while making the agent
-runtime boundary visible.
+The generic context exposes `shell`, `files`, and `patch` operations. `ports`
+and `artifacts` are accepted capability names but have no operations yet.
+Capabilities gate context methods, not the sandbox OS: `shell` can access files,
+and the runner can access the underlying sandbox through `ctx.sandbox`.
+
+Inside agents accept `input_mode="stdin"` (default), `"argv"` (append the
+prompt), `"file"` (write the prompt and append its path), or `"none"`. They
+return `SandboxResult`; outside agents return their runner's value. Install and
+authenticate the agent CLI separately from provider authentication. Presets
+install tools but do not supply agent credentials.
 
 ### Token usage & cost
 
@@ -692,6 +824,14 @@ print(get_backend_pricing("modal"))          # raw bundled pricing metadata
 print(cost_per_second("modal", vcpu=2.0))    # estimated $/sec for a sandbox
 ```
 
+`sb.estimate_compute_cost(elapsed_secs)` estimates a measured interval using
+the live session's hourly rate when available (RunPod), otherwise bundled
+CPU/RAM rates. Bundled estimates omit GPU, disk, network, and other charges;
+an unknown backend also returns zero, which does not establish that it is free.
+Direct SDK `sb.usage` tracks only `run_agent` calls. Remote execution usage
+tracks each command's runtime, while hosted cost summaries use lifecycle costs
+when available, including idle time, without adding execution costs twice.
+
 Pricing data is best-effort and local to the installed package. To compare
 available backends for a real workload, see
 [`examples/find_cheapest.py`](examples/find_cheapest.py), which benchmarks
@@ -701,7 +841,7 @@ cold-start and execution time, then estimates cost with the same pricing data.
 
 Presets are predefined sandbox configurations with setup commands that run after creation.
 The built-in presets are focused on agent CLIs: `codex`, `claude-code`, `claude-code-codex`, and `opencode`.
-Both assume the sandbox image already includes Node.js and `npm` when setup commands are used as a fallback.
+The npm-based setup commands require Node.js and `npm` in the execution environment when setup commands are used as a fallback.
 
 #### Prebuilt Preset Images
 
@@ -732,6 +872,11 @@ You can still override the image explicitly when you need a custom base image:
 with Sandbox("docker", preset="codex", image="my-registry/codex-tools:v3") as sb:
     sb.execute_command("codex --version")
 ```
+
+An explicit image different from the preset image makes setup commands run
+again, so that custom image must support the preset's installation commands.
+On Local and Ray, those commands run on the host/worker and can install global
+npm packages. Use `Sandbox.list_presets()` to inspect registered defaults.
 
 The Dockerfiles live under `images/<preset>/`. Local, Safehouse, Ray, and other
 backends that cannot use the prebuilt image still fall back to the preset setup
@@ -840,11 +985,11 @@ with Sandbox("docker", preset="my-stack") as sb:
 
 Explicit kwargs always override preset defaults.
 
-### Declarative workspace
+### Workspace convenience arguments
 
 Populate the sandbox at creation instead of scripting uploads afterwards.
-`files` are written after any `git_repo` clone, and both land before preset
-setup commands run.
+`files` are written after any `git_repo` clone. Preset setup normally follows
+workspace materialization; OpenCode runs setup first to install its prerequisites.
 
 `files` needs nothing special and works on every backend and image:
 
@@ -870,9 +1015,19 @@ with Sandbox(
     git_repo="https://github.com/psf/requests",
     git_ref="main",                      # optional branch/tag
 ) as sb:
-    entries = sb.list_files("/requests")  # repo is cloned to /<repo-name>
+    entries = sb.list_files("/requests")  # local workspace root / repo name
     print(f"cloned {len(entries)} entries")
 ```
+
+`git_repo=` clones into a relative `<repo-name>` under the command working
+directory; the location is not always `/<repo-name>` on cloud backends. Use
+`Manifest(entries={"/explicit/path": GitRepo(...)})` to choose a destination.
+For Local and Safehouse, `workdir` is a host directory: an explicit directory
+survives `destroy()`, while an automatically created temporary directory is
+removed. Daytona and Tensorlake use `workdir` for shell commands only; their
+code and file APIs keep provider path semantics. RunPod defaults command
+execution to `/workspace`, while its file helpers use SSH path semantics.
+Docker, Modal, E2B, and Ray do not map the top-level `workdir` option.
 
 ### Backend-specific options
 
@@ -921,9 +1076,15 @@ sb2 = Sandbox.resume(SandboxSessionState.from_json(blob))
 print(sb2.read_file("/tmp/work.txt"))   # b"hi\n"
 ```
 
-`SandboxClient("e2b").resume(state)` is equivalent and reuses a pooled client.
-Resume returns the sandbox as-is — preset setup and `files`/`git_repo`
-materialization are skipped.
+`SandboxClient("e2b").resume(state)` is equivalent; an existing client can
+reuse its provider connection.
+Resume skips preset setup and workspace materialization. Provider credentials
+must be available in the resuming process; host-directory sessions require the
+same accessible directory. Session state is not a complete configuration or
+usage checkpoint: wrapper configuration and cumulative agent usage reset on
+resume. Local/Safehouse state includes the supplied environment overlay, which
+may contain secrets. Both attached handles refer to the same resource, so
+destroying either affects the other.
 
 | Backend | Resume by | session_state payload |
 |---|---|---|
@@ -953,6 +1114,11 @@ sb2 = Sandbox("tensorlake", snapshot_id=snap.snapshot_id)
 | Modal | Yes (filesystem) |
 | Daytona, E2B, Local, Ray, RunPod, Safehouse | No |
 
+Restore a Docker snapshot using `image=snap.snapshot_id`; Docker does not map
+`snapshot_id`. Modal and Tensorlake accept `snapshot_id`. Daytona can create
+from an existing provider snapshot via `snapshot_id`, although this adapter
+cannot create snapshots with `snapshot()`.
+
 ### Lifecycle
 
 ```python
@@ -968,7 +1134,13 @@ sb.destroy()
 # Check state
 sb.is_alive       # True/False
 sb.backend_name   # "docker"
+sb.provider_resource_id  # provider ID, or None for local-style backends
 ```
+
+`is_alive` tracks whether this wrapper has been destroyed; it does not poll the
+provider or detect external termination. Cleanup behavior varies by adapter:
+some suppress provider deletion errors. Use provider inventory or configured
+control-plane reconciliation when you need confirmation of resource removal.
 
 ### Reusing a client across many sandboxes
 
@@ -1004,18 +1176,24 @@ import asyncio
 from bespokelabs.sandbox import AsyncSandbox, AsyncSandboxClient
 
 async def run_snippet(client: AsyncSandboxClient, code: str) -> str:
-    async with await client.create(image="python:3.12-slim") as sb:
+    async with await client.create() as sb:
         result = await sb.execute_code(code)
         return result.stdout
 
 async def main():
-    client = AsyncSandboxClient("daytona")
+    client = AsyncSandboxClient("local")
+    snippets = ["print(1 + 1)", "print(2 + 2)"]
     outputs = await asyncio.gather(*(run_snippet(client, c) for c in snippets))
+    print(outputs)
 
 asyncio.run(main())
 ```
 
 One-step creation works too: `sb = await AsyncSandbox.create("local")`.
+Use one `AsyncSandboxClient` per event loop. Execution, files, `run_agent`,
+snapshots, resume, and destruction are awaitable; `session_state()` and
+properties remain synchronous. The wrapper does not expose `agent()` or
+`agent_tools()`.
 
 Backend SDKs are synchronous, so async calls are offloaded to worker
 threads — the event loop is never blocked. Note that the missing-SDK check
@@ -1024,21 +1202,33 @@ rather than at `AsyncSandboxClient(...)` construction, which does no I/O.
 
 ## Feature Support Matrix
 
+This table describes the adapters in this repository, not every feature offered
+by each provider's native SDK. “Interpreter” means an installed binary that
+accepts `-c`; use shell commands for other language runtimes.
+
 | Feature | Local | Safehouse | Docker | Ray | Daytona | Tensorlake | Modal | RunPod | E2B |
 |---|---|---|---|---|---|---|---|---|---|
-| `execute_code` | Any binary | Any binary | Any binary | Any binary | Python, TS, JS, Ruby, Go | Any binary | Any binary | Any binary | Python |
+| `execute_code` | Interpreter | Interpreter | Interpreter | Interpreter | Python | Interpreter | Interpreter | Interpreter | Python |
 | `execute_command` | Shell | Shell | Shell | Shell | Shell | Shell | Shell | SSH | Shell |
 | `list_files` | Native | Native | `find` / `ls` | Native | Native SDK | via `ls` | Native SDK | via SSH | Native SDK |
 | `read_file` | Native | Native | `get_archive` | Native | Native SDK | via `cat` | Native SDK | via SSH | Native SDK |
 | `write_file` | Native | Native | `put_archive` | Native | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
-| `upload_file` | `shutil.copy` | `shutil.copy` | `put_archive` | `ray.put` | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
-| `download_file` | `shutil.copy` | `shutil.copy` | `get_archive` | `ray.get` | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
+| `upload_file` | `shutil.copy` | `shutil.copy` | `put_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
+| `download_file` | `shutil.copy` | `shutil.copy` | `get_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
 | `snapshot` | No | No | Yes | No | No | Yes | Yes | No | No |
 | Resource limits | No | No | cpu, memory | cpu (Ray) | cpu, memory, disk | cpu, memory | cpu, memory, gpu | cpu, memory, disk, gpu | Tier-based |
-| Network control | No | No | Yes | No | Firewall, VPN | Yes | Tunnels | No | No |
+| `allow_internet=False` | Ignored | Ignored | Yes | Ignored | Ignored | Yes | Ignored | Rejected | Ignored |
 | Isolation | Process-level | macOS `sandbox-exec` | Container | Process | Full VM | Container | Container | Container | Full VM |
-| GPU | No | No | No | Via Ray | No | No | Yes | Yes | No |
+| `gpu=` reservation | No | No | No | No | No | No | Yes | Yes | No |
 | Needs install | Nothing | `safehouse` CLI | Docker daemon | `ray` | API key | `tl login` | API key | API key + OpenSSH | API key |
+
+Daytona applies CPU/RAM/disk overrides when creating from `image`; the snapshot
+creation path uses the snapshot's resources. RunPod CPU/RAM values are minimums
+per GPU, not exact allocations. Ray reserves CPU scheduling resources without
+requesting GPU or memory limits. Tensorlake currently does not forward the
+top-level `env_vars` option; inside-agent `AgentSpec.env` can supply per-command
+variables. Its `read_file` converts text stdout to bytes; use `download_file`
+for binary data.
 
 ## Exceptions
 
@@ -1078,7 +1268,9 @@ export DAYTONA_API_KEY=your_key
 export DAYTONA_API_URL=https://app.daytona.io/api   # optional
 export DAYTONA_TARGET=us                              # optional
 
-# Tensorlake (authenticate via CLI)
+# Tensorlake
+export TENSORLAKE_API_KEY=your_key
+# Or authenticate via CLI:
 tl login
 
 # Modal
@@ -1091,3 +1283,79 @@ export RUNPOD_API_KEY=your_key
 # E2B
 export E2B_API_KEY=your_key
 ```
+
+## Examples
+
+Run examples from a source checkout after installing the package. Each script
+lists its own provider and agent prerequisites.
+
+| Example | Demonstrates |
+|---|---|
+| [move_files_into_sandbox.py](examples/move_files_into_sandbox.py) | Generated local directory, file-map seeding, and live transfers |
+| [find_cheapest.py](examples/find_cheapest.py) | Cold-start/execution benchmarks and bundled compute estimates |
+| [sandbox_repo.py](examples/sandbox_repo.py) | Claude Code or Codex inside Daytona/Tensorlake, with a clone or web input |
+| [claude_code_outside.py](examples/claude_code_outside.py) | Host-side agent driving sandbox commands through a local bridge |
+| [claude_code_persona.py](examples/claude_code_persona.py) | Declarative workspace and agent persona files |
+| [github_stats.py](examples/github_stats.py) | Parsing agent output into a Pydantic model |
+
+A local transfer demo needs no cloud credentials or agent CLI:
+
+```bash
+python examples/move_files_into_sandbox.py --backend local
+```
+
+## Development
+
+Use Python 3.11+ to include the server modules and tests:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[dev,server]'
+
+# Unit/API tests using local execution and mocked providers.
+python -m pytest -q --ignore=tests/test_regression.py
+
+# Repository formatting and lint configuration.
+python -m pyink --check src tests examples
+python -m ruff check src tests examples
+```
+
+On macOS, prefix the test command with `COPYFILE_DISABLE=1` to prevent the
+system tar from adding AppleDouble `._*` files to directory-transfer fixtures:
+
+```bash
+COPYFILE_DISABLE=1 python -m pytest -q --ignore=tests/test_regression.py
+```
+
+`tests/test_regression.py` probes installed providers at collection time and
+can create real resources when SDKs/authentication are available. Run
+`python -m pytest -q` when you intend to exercise those integrations. Mocked
+Daytona adapter tests also need the `[daytona]` extra and skip without it.
+The test suite exercises Python/API behavior and dashboard asset contracts;
+`tests/dashboard_browser_app.py` is a separate deterministic browser fixture.
+
+### Codebase map
+
+| Path | Responsibility |
+|---|---|
+| `src/bespokelabs/sandbox/sandbox.py` | Direct SDK, lifecycle, workspace setup, structured output, agent cost tracking |
+| `src/bespokelabs/sandbox/aio.py` | Thread-backed async client and session wrapper |
+| `src/bespokelabs/sandbox/backends/` | Nine lazy-loaded provider clients and sessions |
+| `src/bespokelabs/sandbox/protocols.py`, `types.py`, `exceptions.py` | Backend contracts and shared public types/errors |
+| `src/bespokelabs/sandbox/workspace.py`, `_transfer.py` | Manifest entries and directory transfer strategies |
+| `src/bespokelabs/sandbox/agents.py`, `_agent_runtime.py`, `_usage.py` | Agent placement, command preparation, Claude/OpenCode usage parsing |
+| `src/bespokelabs/sandbox/presets.py`, `pricing.py`, `pricing.json` | Preset configuration and bundled compute rates |
+| `src/bespokelabs/sandbox/remote.py` | Standard-library HTTP client for the control plane |
+| `src/bespokelabs/sandbox/control_plane/` | FastAPI routes, tenant service, SQLite migrations/ledgers, supervision, dashboard assets |
+| `images/`, `.github/workflows/build-images.yml` | Preset Dockerfiles and image publishing workflow |
+| `tests/`, `examples/`, `docs/` | Regression coverage, usage examples, API contract and operations runbook |
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for design direction and compatibility
+rules. It includes proposed integrations as well as implemented concepts;
+the current public API is exported by `src/bespokelabs/sandbox/__init__.py`.
+For server deployments, read the [operations runbook](docs/CONTROL_PLANE_OPERATIONS.md).
+
+## License
+
+[Apache License 2.0](LICENSE).
