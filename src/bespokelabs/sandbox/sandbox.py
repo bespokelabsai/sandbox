@@ -197,10 +197,13 @@ class Sandbox:
             and self._config.image == preset_image_for_backend
             and backend in image_backends
         )
-        # Materialize the workspace, then run setup. The repo is cloned
-        # first so files= can overlay onto it, and setup commands can
-        # rely on both being present. Any failure destroys the sandbox.
+        # Presets may install prerequisites before cloning. Otherwise setup
+        # runs after materialization, so it can rely on workspace files.
+        # Any failure destroys the sandbox.
         try:
+            needs_setup = resolved_preset is not None and not using_preset_image
+            if needs_setup and resolved_preset.setup_before_workspace:
+                self._run_preset_setup(resolved_preset)
             if git_repo:
                 self._clone_repo(git_repo, git_ref)
             if files:
@@ -208,7 +211,7 @@ class Sandbox:
                     self._session.write_file(path, content)
             if workspace is not None:
                 workspace.apply(self)
-            if resolved_preset and not using_preset_image:
+            if needs_setup and not resolved_preset.setup_before_workspace:
                 self._run_preset_setup(resolved_preset)
         except Exception:
             self.destroy()

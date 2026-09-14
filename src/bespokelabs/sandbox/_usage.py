@@ -7,6 +7,7 @@ Supports Claude Code JSON results and OpenCode JSON events.
 from __future__ import annotations
 
 import json
+import math
 
 from bespokelabs.sandbox.types import Usage
 
@@ -124,12 +125,12 @@ def parse_opencode_result(stdout: str) -> dict | None:
         cache = tokens.get("cache")
         cache = cache if isinstance(cache, dict) else {}
         usage = usage + Usage(
-            input_tokens=_int(tokens.get("input")),
-            output_tokens=_int(tokens.get("output"))
-            + _int(tokens.get("reasoning")),
-            cache_read_tokens=_int(cache.get("read")),
-            cache_creation_tokens=_int(cache.get("write")),
-            llm_cost_usd=_float(part.get("cost")),
+            input_tokens=_int(_opencode_number(tokens.get("input"))),
+            output_tokens=_int(_opencode_number(tokens.get("output")))
+            + _int(_opencode_number(tokens.get("reasoning"))),
+            cache_read_tokens=_int(_opencode_number(cache.get("read"))),
+            cache_creation_tokens=_int(_opencode_number(cache.get("write"))),
+            llm_cost_usd=_float(_opencode_number(part.get("cost"))),
         )
     return {
         "result": "\n\n".join(texts),
@@ -142,6 +143,20 @@ def parse_opencode_result(stdout: str) -> dict | None:
         },
         "events": events,
     }
+
+
+def _opencode_number(value: object) -> int | float:
+    """Return a finite number, treating malformed OpenCode values as zero."""
+    try:
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+        ):
+            return value
+    except (OverflowError, TypeError, ValueError):
+        pass
+    return 0
 
 
 def result_text(record: dict | None) -> str | None:

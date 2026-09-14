@@ -4,16 +4,28 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 
 from bespokelabs.sandbox import Sandbox
+
+DEFAULT_WORKDIR = (
+    Path(__file__).resolve().parent / ".sandbox_workdir" / "opencode_glm"
+)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run GLM through OpenCode")
     parser.add_argument("--backend", default="local")
     parser.add_argument("--model", default="zai/glm-4.7")
-    parser.add_argument("--prompt", default="Explain this project's structure.")
-    parser.add_argument("--workdir", default=None)
+    parser.add_argument(
+        "--prompt",
+        default="Create a hello-world Python script in this workspace.",
+    )
+    parser.add_argument(
+        "--workdir",
+        default=str(DEFAULT_WORKDIR),
+        help="Persistent workspace (default: examples/.sandbox_workdir/opencode_glm)",
+    )
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     api_key = os.environ.get("ZHIPU_API_KEY")

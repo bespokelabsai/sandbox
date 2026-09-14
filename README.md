@@ -638,13 +638,18 @@ GLM models can be selected using their OpenCode `provider/model` identifier.
 `resume=True` continues the latest conversation in the same workspace;
 `extra_args=["--session", session_id]` selects a specific session.
 The preset installs OpenCode at startup, requiring npm and install permissions
-on the sandbox; its Docker setup also installs npm on the default Debian image.
+on the sandbox; its Docker setup installs npm and Git on the default Debian image
+before cloning repositories. OpenCode opts into `setup_before_workspace=True`;
+other presets retain setup after workspace materialization by default.
 No prebuilt OpenCode image is assumed. The preset installs the CLI; select the
 harness separately with `harness="opencode"` when calling `run_agent`.
 OpenCode JSON step costs and token counts are summed across the run, including
 cache usage and reasoning tokens (included in `output_tokens`). Original events
 are available in `result.raw["events"]`; stdout, stderr and exit status are
-preserved. See [the runnable GLM example](examples/opencode_glm.py).
+preserved. See [the runnable GLM example](examples/opencode_glm.py). Its local
+workspace defaults to the Git-ignored `examples/.sandbox_workdir/opencode_glm`
+directory and survives cleanup, so `--resume` works across invocations. Use
+`--workdir` to override it. Recreating a cloud sandbox does not retain its files.
 
 `run_agent(...)` runs Claude Code on a prompt and reports what the run cost.
 It drives the CLI with JSON output under the hood, so it can return both the

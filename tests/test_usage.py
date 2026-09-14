@@ -155,6 +155,39 @@ def _opencode_json() -> str:
 
 class OpenCodeParsingTests(unittest.TestCase):
 
+    def test_non_finite_usage_contributes_zero(self):
+        for value in [
+            float("nan"),
+            float("inf"),
+            -float("inf"),
+            10**400,
+            None,
+            True,
+            "invalid",
+        ]:
+            with self.subTest(value=str(value)):
+                event = {
+                    "type": "step_finish",
+                    "part": {
+                        "cost": value,
+                        "tokens": {
+                            "input": value,
+                            "output": value,
+                            "reasoning": value,
+                            "cache": {"read": value, "write": value},
+                        },
+                    },
+                }
+                record = parse_opencode_result(json.dumps(event))
+                self.assertEqual(usage_from_result(record), Usage())
+                record = parse_opencode_result(
+                    json.dumps(event) + "\n" + _opencode_json()
+                )
+                self.assertEqual(
+                    usage_from_result(record),
+                    usage_from_result(parse_opencode_result(_opencode_json())),
+                )
+
     def test_steps_are_summed_and_duplicate_updates_not_billed_twice(self):
         stream = _opencode_json()
         record = parse_opencode_result(stream + "\n" + stream)
