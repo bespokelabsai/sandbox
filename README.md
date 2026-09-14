@@ -615,6 +615,42 @@ runtime boundary visible.
 
 ### Token usage & cost
 
+To run GLM through the [OpenCode harness](https://opencode.ai/docs/cli/#run):
+
+```python
+import os
+from bespokelabs.sandbox import Sandbox
+
+with Sandbox(
+    "local", preset="opencode",
+    env_vars={"ZHIPU_API_KEY": os.environ["ZHIPU_API_KEY"]},
+) as sb:
+    result = sb.run_agent(
+        "Review this project.", harness="opencode", model="zai/glm-4.7",
+    )
+    print(result.text)
+    print(result.usage.total_tokens, result.usage.total_cost_usd)
+```
+
+For a [Z.AI Coding Plan](https://opencode.ai/docs/providers/#zai), use
+`model="zai-coding-plan/glm-4.7"` with the same environment variable. Other
+GLM models can be selected using their OpenCode `provider/model` identifier.
+`resume=True` continues the latest conversation in the same workspace;
+`extra_args=["--session", session_id]` selects a specific session.
+The preset installs OpenCode at startup, requiring npm and install permissions
+on the sandbox; its Docker setup installs npm and Git on the default Debian image
+before cloning repositories. OpenCode opts into `setup_before_workspace=True`;
+other presets retain setup after workspace materialization by default.
+No prebuilt OpenCode image is assumed. The preset installs the CLI; select the
+harness separately with `harness="opencode"` when calling `run_agent`.
+OpenCode JSON step costs and token counts are summed across the run, including
+cache usage and reasoning tokens (included in `output_tokens`). Original events
+are available in `result.raw["events"]`; stdout, stderr and exit status are
+preserved. See [the runnable GLM example](examples/opencode_glm.py). Its local
+workspace defaults to the Git-ignored `examples/.sandbox_workdir/opencode_glm`
+directory and survives cleanup, so `--resume` works across invocations. Use
+`--workdir` to override it. Recreating a cloud sandbox does not retain its files.
+
 `run_agent(...)` runs Claude Code on a prompt and reports what the run cost.
 It drives the CLI with JSON output under the hood, so it can return both the
 assistant's text answer and a `Usage` breakdown — LLM token counts and dollar
@@ -640,8 +676,8 @@ with Sandbox("local", preset="claude-code") as sb:
 
 `sb.usage` is the running total across every `run_agent` call in the sandbox's
 lifetime (its compute component sums the agent-call durations, not idle time
-between calls). Pass extra CLI flags with `extra_args=[...]`. Only Claude Code
-is supported today; token counts and `llm_cost_usd` reflect exactly what its
+between calls). Pass extra CLI flags with `extra_args=[...]`. Claude Code and
+OpenCode are supported; token counts and `llm_cost_usd` reflect what the CLI's
 JSON output reports, so `llm_cost_usd` can be `0` under subscription auth that
 omits `total_cost_usd` (the token counts are still captured). The async
 `AsyncSandbox` exposes the same `run_agent(...)` / `usage`. This is distinct
@@ -664,7 +700,7 @@ cold-start and execution time, then estimates cost with the same pricing data.
 ### Presets
 
 Presets are predefined sandbox configurations with setup commands that run after creation.
-The built-in presets are intentionally focused on agent CLIs: `codex`, `claude-code`, and `claude-code-codex`.
+The built-in presets are focused on agent CLIs: `codex`, `claude-code`, `claude-code-codex`, and `opencode`.
 Both assume the sandbox image already includes Node.js and `npm` when setup commands are used as a fallback.
 
 #### Prebuilt Preset Images
@@ -726,6 +762,7 @@ Built-in presets:
 | `claude-code` | `@anthropic-ai/claude-code` via npm | 2GB RAM, 30min timeout |
 | `claude-code-codex` | `@anthropic-ai/claude-code` and `@openai/codex` via npm | 2GB RAM, 30min timeout |
 | `codex` | `@openai/codex` via npm | 2GB RAM, 30min timeout |
+| `opencode` | `opencode-ai` via npm | 2GB RAM, 30min timeout |
 
 #### Non-interactive web access
 
