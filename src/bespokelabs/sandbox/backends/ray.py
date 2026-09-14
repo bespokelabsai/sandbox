@@ -296,6 +296,11 @@ class RaySession:
             "Session resume is not supported by the Ray backend (anonymous actors)"
         )
 
+    @property
+    def provider_resource_id(self) -> None:
+        """Anonymous Ray actors expose no stable provider resource ID."""
+        return None
+
     def destroy(self) -> None:
         try:
             if self._actor:

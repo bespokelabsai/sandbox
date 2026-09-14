@@ -9,13 +9,20 @@ import pathlib
 import shlex
 import threading
 import uuid
+from dataclasses import dataclass
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
+    ErrorOutcome,
     FeatureNotSupportedError,
+    SandboxAuthenticationError,
     SandboxConfigurationError,
+    SandboxConnectionError,
     SandboxCreationError,
+    SandboxError,
     SandboxExecutionError,
+    SandboxNotFoundError,
+    SandboxTimeoutError,
 )
 from bespokelabs.sandbox.types import (
     FileInfo,
@@ -34,6 +41,88 @@ _CREATE_TOKEN_LABEL = "bespokelabs.sandbox/create-token"
 
 # backend_options key that overrides the deadline passed to Daytona.create().
 _CREATE_TIMEOUT_OPTION = "create_timeout"
+
+
+@dataclass(frozen=True)
+class _CleanupReport:
+    status: str
+    provider_resource_id: str | None = None
+
+
+def _classify_daytona_error(
+    exc: Exception,
+    *,
+    op: str,
+    cleanup: _CleanupReport | None = None,
+) -> SandboxError:
+    """Translate Daytona SDK exception types into the public error taxonomy."""
+    try:
+        from daytona.common.errors import (  # type: ignore[import-untyped]
+            DaytonaAuthenticationError,
+            DaytonaConnectionError,
+            DaytonaForbiddenError,
+            DaytonaNotFoundError,
+            DaytonaTimeoutError,
+        )
+    except ImportError:  # pragma: no cover - DaytonaClient guards installation
+        DaytonaAuthenticationError = ()
+        DaytonaConnectionError = ()
+        DaytonaForbiddenError = ()
+        DaytonaNotFoundError = ()
+        DaytonaTimeoutError = ()
+
+    context: dict[str, str | int] = {}
+    provider_status = getattr(exc, "status_code", None)
+    provider_code = getattr(exc, "code", None)
+    if isinstance(provider_status, int):
+        context["provider_status"] = provider_status
+    if isinstance(provider_code, str):
+        context["provider_code"] = provider_code
+    if cleanup is not None:
+        context["cleanup_status"] = cleanup.status
+        if cleanup.provider_resource_id:
+            context["provider_resource_id"] = cleanup.provider_resource_id
+
+    outcome = (
+        ErrorOutcome.UNKNOWN
+        if cleanup is not None and cleanup.status == "unknown"
+        else ErrorOutcome.FAILED
+    )
+    common = {
+        "backend": "daytona",
+        "op": op,
+        "context": context,
+        "outcome": outcome,
+    }
+    if isinstance(exc, (DaytonaAuthenticationError, DaytonaForbiddenError)):
+        return SandboxAuthenticationError(
+            "Daytona authentication failed.", **common
+        )
+    if isinstance(exc, DaytonaTimeoutError) or isinstance(exc, TimeoutError):
+        return SandboxTimeoutError(
+            f"Daytona {op} timed out.",
+            retryable=outcome is ErrorOutcome.FAILED,
+            **common,
+        )
+    if isinstance(exc, DaytonaConnectionError) or isinstance(
+        exc, ConnectionError
+    ):
+        return SandboxConnectionError(
+            f"Daytona {op} connection failed.",
+            retryable=outcome is ErrorOutcome.FAILED,
+            **common,
+        )
+    if isinstance(exc, DaytonaNotFoundError):
+        return SandboxNotFoundError(
+            f"Daytona resource was not found during {op}.", **common
+        )
+    if op == "create":
+        # Preserve the historical local-library message for opaque/older SDK
+        # failures. The hosted API never serializes this provider text.
+        return SandboxCreationError(
+            f"Failed to create Daytona sandbox: {exc}", **common
+        )
+    return SandboxExecutionError(f"Daytona {op} failed.", **common)
 
 
 class DaytonaClient:
@@ -67,8 +156,10 @@ class DaytonaClient:
                 if self._client is None:
                     api_key = os.environ.get("DAYTONA_API_KEY")
                     if not api_key:
-                        raise SandboxCreationError(
-                            "DAYTONA_API_KEY environment variable is not set"
+                        raise SandboxAuthenticationError(
+                            "DAYTONA_API_KEY environment variable is not set",
+                            backend="daytona",
+                            op="create",
                         )
                     self._client = self._daytona_cls(
                         self._daytona_config_cls(
@@ -93,9 +184,7 @@ class DaytonaClient:
         try:
             sandbox = getter(data["sandbox_id"])
         except Exception as exc:
-            raise SandboxCreationError(
-                f"Cannot resume Daytona sandbox '{data.get('sandbox_id')}': {exc}"
-            ) from exc
+            raise _classify_daytona_error(exc, op="connect") from exc
         return DaytonaSession(
             client=client, sandbox=sandbox, workdir=data.get("workdir")
         )
@@ -116,9 +205,9 @@ class DaytonaClient:
                 # it once here.  Inside the try, so a failure is still reaped.
                 sandbox.process.exec(f"mkdir -p {shlex.quote(config.workdir)}")
         except Exception as exc:
-            self._reap_orphan(create_token)
-            raise SandboxCreationError(
-                f"Failed to create Daytona sandbox: {exc}"
+            cleanup = self._reap_orphan(create_token)
+            raise _classify_daytona_error(
+                exc, op="create", cleanup=cleanup
             ) from exc
         except BaseException:
             # KeyboardInterrupt / SystemExit: still reap, then propagate as-is.
@@ -129,7 +218,7 @@ class DaytonaClient:
             client=self._client, sandbox=sandbox, workdir=config.workdir
         )
 
-    def _reap_orphan(self, create_token: str) -> None:
+    def _reap_orphan(self, create_token: str) -> _CleanupReport:
         """Delete the sandbox a failed create may have left running.
 
         When the create request's HTTP response times out, the sandbox exists
@@ -161,8 +250,13 @@ class DaytonaClient:
                 create_token,
                 exc_info=True,
             )
-            return
+            return _CleanupReport("unknown")
 
+        if not orphans:
+            return _CleanupReport("not_found")
+
+        deleted_ids: list[str] = []
+        unknown_id: str | None = None
         for orphan in orphans:
             orphan_id = getattr(orphan, "id", "<unknown>")
             try:
@@ -173,11 +267,19 @@ class DaytonaClient:
                     orphan_id,
                     exc_info=True,
                 )
+                if unknown_id is None and orphan_id != "<unknown>":
+                    unknown_id = str(orphan_id)
             else:
+                deleted_ids.append(str(orphan_id))
                 logger.warning(
                     "Deleted Daytona sandbox %s orphaned by a failed create.",
                     orphan_id,
                 )
+        if unknown_id is not None or len(deleted_ids) != len(orphans):
+            return _CleanupReport("unknown", unknown_id)
+        return _CleanupReport(
+            "deleted", deleted_ids[0] if len(deleted_ids) == 1 else None
+        )
 
 
 def _create_kwargs(config: SandboxConfig) -> dict:
@@ -310,6 +412,12 @@ class DaytonaSession:
         self._sandbox: object = sandbox
         self._workdir = workdir
 
+    @property
+    def provider_resource_id(self) -> str | None:
+        """Return Daytona's durable sandbox identifier when available."""
+        value = getattr(self._sandbox, "id", None)
+        return str(value) if value is not None else None
+
     def execute_code(
         self, code: str, language: str = "python"
     ) -> SandboxResult:
@@ -322,9 +430,7 @@ class DaytonaSession:
                 exit_code=getattr(response, "exit_code", 0) or 0,
             )
         except Exception as exc:
-            raise SandboxExecutionError(
-                f"Daytona code execution failed: {exc}"
-            ) from exc
+            raise _classify_daytona_error(exc, op="execute") from exc
 
     def execute_command(
         self, command: str, args: list[str] | None = None
@@ -342,9 +448,7 @@ class DaytonaSession:
                 exit_code=getattr(response, "exit_code", 0) or 0,
             )
         except Exception as exc:
-            raise SandboxExecutionError(
-                f"Daytona command execution failed: {exc}"
-            ) from exc
+            raise _classify_daytona_error(exc, op="execute") from exc
 
     def list_files(self, path: str = "/") -> list[FileInfo]:
         try:
@@ -421,6 +525,6 @@ class DaytonaSession:
         try:
             if self._sandbox and self._client:
                 self._client.delete(self._sandbox)
-        except Exception:
-            pass
+        except Exception as exc:
+            raise _classify_daytona_error(exc, op="destroy") from exc
         self._sandbox = None

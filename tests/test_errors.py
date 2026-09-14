@@ -10,8 +10,10 @@ from bespokelabs.sandbox import (
     BackendNotInstalledError,
     CommandFailedError,
     ErrorCode,
+    ErrorOutcome,
     FeatureNotSupportedError,
     Sandbox,
+    SandboxAuthenticationError,
     SandboxConfigurationError,
     SandboxConnectionError,
     SandboxCreationError,
@@ -34,12 +36,18 @@ class BackwardCompatTests(unittest.TestCase):
         self.assertEqual(err.context, {})
         self.assertIsNone(err.backend)
         self.assertIsNone(err.op)
+        self.assertEqual(err.outcome, ErrorOutcome.FAILED)
 
     def test_subclass_plain_message_has_no_suffix(self) -> None:
         # Even though subclasses carry a non-UNKNOWN code, a bare message must
         # render exactly as before (no structured fields -> no suffix).
         self.assertEqual(str(SandboxCreationError("nope")), "nope")
         self.assertEqual(str(SandboxExecutionError("nope")), "nope")
+
+    def test_provider_authentication_remains_a_creation_error(self) -> None:
+        self.assertIsInstance(
+            SandboxAuthenticationError("nope"), SandboxCreationError
+        )
 
 
 class StructuredContextTests(unittest.TestCase):
@@ -93,6 +101,11 @@ class SubclassDefaultsTests(unittest.TestCase):
             (CommandFailedError, ErrorCode.COMMAND_FAILED, False),
             (SandboxTimeoutError, ErrorCode.TIMEOUT, True),
             (SandboxConnectionError, ErrorCode.CONNECTION, True),
+            (
+                SandboxAuthenticationError,
+                ErrorCode.AUTHENTICATION,
+                False,
+            ),
             (SandboxNotFoundError, ErrorCode.NOT_FOUND, False),
             (FeatureNotSupportedError, ErrorCode.FEATURE_NOT_SUPPORTED, False),
             (WorkspaceError, ErrorCode.WORKSPACE, False),

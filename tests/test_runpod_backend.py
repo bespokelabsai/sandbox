@@ -389,6 +389,15 @@ class RunpodClientTests(unittest.TestCase):
 
 class RunpodSessionTests(unittest.TestCase):
 
+    def test_pod_id_is_explicit_on_session_and_sandbox(self) -> None:
+        session = _session()
+        sandbox = Sandbox._from_session(
+            "runpod", session, SandboxConfig(backend="runpod")
+        )
+
+        self.assertEqual(session.provider_resource_id, "pod-123")
+        self.assertEqual(sandbox.provider_resource_id, "pod-123")
+
     @mock.patch("bespokelabs.sandbox.backends.runpod.subprocess.run")
     def test_execute_command_quotes_arguments_and_workdir(
         self, run: mock.Mock

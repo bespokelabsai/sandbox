@@ -27,6 +27,8 @@ class SandboxPreset:
         timeout_secs: Recommended timeout.
         env_vars: Environment variables to set.
         allow_internet: Whether internet access is needed (e.g. for installs).
+        setup_before_workspace: Run setup before cloning and materializing
+            files, for presets that install workspace prerequisites like git.
 
     """
 
@@ -41,6 +43,7 @@ class SandboxPreset:
     timeout_secs: int = 600
     env_vars: dict[str, str] = field(default_factory=dict)
     allow_internet: bool = True
+    setup_before_workspace: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +91,26 @@ def _tensorlake_npm_install(packages: str) -> str:
 
 
 # -- Agent presets ---------------------------------------------------------
+
+register_preset(
+    SandboxPreset(
+        name="opencode",
+        description="Sandbox with OpenCode CLI installed (including GLM support)",
+        setup_commands=["npm install -g opencode-ai"],
+        backend_setup_commands={
+            "docker": [
+                "(command -v npm >/dev/null 2>&1 && "
+                "command -v git >/dev/null 2>&1) || "
+                "(apt-get update && apt-get install -y nodejs npm git)",
+                "npm install -g opencode-ai",
+            ],
+            "tensorlake": [_tensorlake_npm_install("opencode-ai")],
+        },
+        memory_mb=2048,
+        timeout_secs=1800,
+        setup_before_workspace=True,
+    )
+)
 
 register_preset(
     SandboxPreset(

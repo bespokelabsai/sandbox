@@ -78,6 +78,12 @@ class E2BSession:
     def __init__(self, *, sandbox: object) -> None:
         self._sandbox: object = sandbox
 
+    @property
+    def provider_resource_id(self) -> str | None:
+        """Return the E2B sandbox ID while it is attached."""
+        value = getattr(self._sandbox, "sandbox_id", None)
+        return str(value) if value is not None else None
+
     def execute_code(
         self, code: str, language: str = "python"
     ) -> SandboxResult:

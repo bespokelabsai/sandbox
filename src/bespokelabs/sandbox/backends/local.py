@@ -264,6 +264,11 @@ class LocalSession:
             "env_vars": self._env_overlay,
         }
 
+    @property
+    def provider_resource_id(self) -> None:
+        """Local sandboxes have no external provider resource."""
+        return None
+
     def destroy(self) -> None:
         try:
             if (

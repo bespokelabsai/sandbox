@@ -12,11 +12,29 @@ from bespokelabs.sandbox.presets import (
 )
 from bespokelabs.sandbox.types import SandboxResult
 
-BUILT_IN_PRESETS = {"claude-code", "claude-code-codex", "codex"}
+BUILT_IN_PRESETS = {"claude-code", "claude-code-codex", "codex", "opencode"}
 TENSORLAKE_NPM_PREFIX = "mkdir -p $HOME/.npm-global && npm config set prefix $HOME/.npm-global && npm install -g"
 
 
 class PresetTests(unittest.TestCase):
+
+    def test_opencode_installs_on_all_backends(self) -> None:
+        preset = get_preset("opencode")
+        self.assertIsNone(preset.image)
+        self.assertEqual(preset.setup_commands, ["npm install -g opencode-ai"])
+        self.assertTrue(preset.setup_before_workspace)
+        self.assertEqual(
+            preset.backend_setup_commands["docker"],
+            [
+                "(command -v npm >/dev/null 2>&1 && command -v git >/dev/null 2>&1) || "
+                "(apt-get update && apt-get install -y nodejs npm git)",
+                "npm install -g opencode-ai",
+            ],
+        )
+        self.assertEqual(
+            preset.backend_setup_commands["tensorlake"],
+            [f"{TENSORLAKE_NPM_PREFIX} opencode-ai"],
+        )
 
     def test_builtin_presets_are_limited_to_agent_clis(self) -> None:
         self.assertEqual(set(PRESETS), BUILT_IN_PRESETS)
@@ -161,6 +179,49 @@ class PresetImageResolutionTests(unittest.TestCase):
 
         self.assertEqual(sb._config.image, "ghcr.io/test/img:latest")
         sb._session.execute_command.assert_not_called()
+
+    def test_opencode_docker_setup_precedes_clone_and_files(self):
+        with Sandbox(
+            "docker",
+            preset="opencode",
+            git_repo="https://example.com/repo.git",
+            files={"repo/input.txt": "data"},
+        ) as sb:
+            calls = sb._session.mock_calls
+            provisioning, install = get_preset(
+                "opencode"
+            ).backend_setup_commands["docker"]
+            self.assertEqual(
+                calls,
+                [
+                    mock.call.execute_command(provisioning),
+                    mock.call.execute_command(install),
+                    mock.call.execute_command(
+                        "git clone --depth 1 https://example.com/repo.git repo",
+                        None,
+                    ),
+                    mock.call.write_file("repo/input.txt", "data"),
+                ],
+            )
+
+    def test_early_setup_failure_cleans_up_before_clone(self):
+        from bespokelabs.sandbox.exceptions import SandboxCreationError
+
+        session = mock.MagicMock()
+        session.execute_command.return_value = SandboxResult(
+            exit_code=1, stderr="install failed"
+        )
+        client = mock.MagicMock()
+        client.create.return_value = session
+        with self.assertRaises(SandboxCreationError):
+            Sandbox(
+                "docker",
+                preset="opencode",
+                git_repo="https://example.com/repo.git",
+                _backend_client=client,
+            )
+        session.execute_command.assert_called_once()
+        session.destroy.assert_called_once()
 
     def test_tensorlake_inherits_tensorlake_image_and_skips_setup(self) -> None:
         sb = Sandbox(backend="tensorlake", preset=self.PRESET_NAME)

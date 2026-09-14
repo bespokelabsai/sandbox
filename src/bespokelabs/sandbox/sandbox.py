@@ -14,6 +14,7 @@ from typing import TypeVar, overload
 from bespokelabs.sandbox import _transfer, pricing
 from bespokelabs.sandbox._usage import (
     parse_claude_result,
+    parse_opencode_result,
     result_text,
     usage_from_result,
 )
@@ -196,10 +197,13 @@ class Sandbox:
             and self._config.image == preset_image_for_backend
             and backend in image_backends
         )
-        # Materialize the workspace, then run setup. The repo is cloned
-        # first so files= can overlay onto it, and setup commands can
-        # rely on both being present. Any failure destroys the sandbox.
+        # Presets may install prerequisites before cloning. Otherwise setup
+        # runs after materialization, so it can rely on workspace files.
+        # Any failure destroys the sandbox.
         try:
+            needs_setup = resolved_preset is not None and not using_preset_image
+            if needs_setup and resolved_preset.setup_before_workspace:
+                self._run_preset_setup(resolved_preset)
             if git_repo:
                 self._clone_repo(git_repo, git_ref)
             if files:
@@ -207,13 +211,19 @@ class Sandbox:
                     self._session.write_file(path, content)
             if workspace is not None:
                 workspace.apply(self)
-            if resolved_preset and not using_preset_image:
+            if needs_setup and not resolved_preset.setup_before_workspace:
                 self._run_preset_setup(resolved_preset)
         except Exception:
             self.destroy()
             raise
 
     # -- Core operations ---------------------------------------------------
+
+    @property
+    def provider_resource_id(self) -> str | None:
+        """Return the backend resource identifier when it exposes one."""
+        value = getattr(self._session, "provider_resource_id", None)
+        return str(value) if value is not None else None
 
     @overload
     def execute_code(
@@ -415,12 +425,14 @@ class Sandbox:
         self,
         prompt: str,
         *,
-        command: str = "claude",
+        command: str | None = None,
+        harness: str = "claude-code",
+        model: str | None = None,
         extra_args: list[str] | None = None,
         output_format: str = "json",
         resume: bool = False,
     ) -> AgentRunResult:
-        """Run Claude Code on *prompt* and return its answer plus token/cost usage.
+        """Run an agent on *prompt* and return its answer plus token/cost usage.
 
         Unlike :meth:`execute_command`, this owns the agent's output format so
         usage data is always available: it invokes ``claude -p <prompt>
@@ -434,25 +446,53 @@ class Sandbox:
         continue the most recent conversation (``-c``) and ``extra_args`` to
         forward extra CLI flags.
 
-        Only Claude Code is supported today; ``llm_cost_usd`` and token counts
-        reflect exactly what its JSON output reports (and may be ``0`` under
+        Select ``harness="opencode"`` to run OpenCode, with ``model`` in
+        provider/model form (for example ``zai/glm-4.7``). Its JSON events
+        are aggregated across steps; reasoning is included in output tokens.
+        ``command`` overrides the selected harness's binary. OpenCode accepts
+        ``json`` or ``default`` output formats (``text`` aliases ``default``).
+
+        ``llm_cost_usd`` and token counts reflect the CLI reports (and may be ``0`` under
         subscription auth that omits ``total_cost_usd``).  On non-zero exit the
         result still carries whatever usage was parsed; inspect ``exit_code``.
         """
         self._check_alive()
-        args = ["-p", prompt, "--output-format", output_format]
+        if harness not in {"claude-code", "opencode"}:
+            raise ValueError(f"Unsupported agent harness: {harness!r}")
+        command = command or ("opencode" if harness == "opencode" else "claude")
+        if harness == "opencode":
+            if output_format not in {"json", "default", "text"}:
+                raise ValueError(
+                    "OpenCode output_format must be json, default, or text"
+                )
+            args = [
+                "run",
+                "--format",
+                "default" if output_format == "text" else output_format,
+            ]
+        else:
+            args = ["-p", prompt, "--output-format", output_format]
         if resume:
             args.append("-c")
+        if model is not None:
+            args.extend(["--model", model])
         if extra_args:
             args.extend(extra_args)
+        if harness == "opencode":
+            args.extend(["--", prompt])
 
         start = time.monotonic()
         result = self._session.execute_command(command, args)
         elapsed = time.monotonic() - start
 
-        record = parse_claude_result(result.stdout)
+        parser = (
+            parse_opencode_result
+            if harness == "opencode"
+            else parse_claude_result
+        )
+        record = parser(result.stdout)
         usage = usage_from_result(record) or Usage()
-        usage.compute_cost_usd = self._compute_cost(elapsed)
+        usage.compute_cost_usd = self.estimate_compute_cost(elapsed)
         self._usage = self._usage + usage
 
         text = result_text(record)
@@ -465,8 +505,13 @@ class Sandbox:
             raw=record,
         )
 
-    def _compute_cost(self, elapsed_secs: float) -> float:
-        """Estimate sandbox compute cost for an interval of *elapsed_secs*."""
+    def estimate_compute_cost(self, elapsed_secs: float) -> float:
+        """Estimate this sandbox's compute cost for a measured interval.
+
+        Dynamic provider pricing exposed by the live session takes precedence
+        over the package's bundled CPU/RAM estimates. This is also used by the
+        control plane to meter ordinary command and code executions.
+        """
         # GPU Pod pricing is selected dynamically from live capacity. Backends
         # that expose the actual hourly rate take precedence over the static
         # CPU/RAM estimates bundled with this package.
@@ -479,6 +524,10 @@ class Sandbox:
             ram_gib=self._config.memory_mb / 1024,
         )
         return cost_per_sec * elapsed_secs
+
+    def _compute_cost(self, elapsed_secs: float) -> float:
+        """Compatibility wrapper for the former private cost helper."""
+        return self.estimate_compute_cost(elapsed_secs)
 
     @classmethod
     def resume(cls, state: SandboxSessionState) -> Sandbox:
@@ -497,7 +546,13 @@ class Sandbox:
         return self
 
     def __exit__(self, *exc: object) -> None:
-        self.destroy()
+        # Context-manager cleanup remains best-effort for compatibility. Direct
+        # destroy() calls still surface provider failures so control planes can
+        # record an accurate cleanup state instead of reporting a leak as gone.
+        try:
+            self.destroy()
+        except Exception:
+            pass
 
     # -- Properties --------------------------------------------------------
 
