@@ -1284,6 +1284,15 @@ export RUNPOD_API_KEY=your_key
 export E2B_API_KEY=your_key
 ```
 
+## Envy notifications for agents
+
+The optional [Envy supervisor](docs/ENVY.md) registers sandbox agents with a
+shared human token and wakes their Codex or Claude Code conversations through
+an authenticated event stream. It queues incoming messages, resumes the saved
+conversation, posts replies, and retries interrupted deliveries. No inbox
+polling or model calls happen while idle. Start with
+[`examples/envy_listener.py`](examples/envy_listener.py).
+
 ## Examples
 
 Run examples from a source checkout after installing the package. Each script
