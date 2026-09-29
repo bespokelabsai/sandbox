@@ -44,6 +44,26 @@ The only required core dependency is Pydantic; provider SDKs are optional.
 pip install bespokelabs-sandbox
 ```
 
+Sandbox can share an environment with Curator:
+
+```bash
+python -m pip install bespokelabs-curator bespokelabs-sandbox
+```
+
+```python
+from bespokelabs import curator, sandbox
+```
+
+Each distribution owns its own subpackage. Sandbox installs only
+`bespokelabs/sandbox`; it does not install `bespokelabs/__init__.py`.
+The separate `bespokelabs` distribution is not needed for these imports.
+The Nimble SDK uses the `bespokelabs-nimble` distribution.
+
+For upgrades from older releases that shared the root file, use a fresh virtual
+environment with namespace-compatible versions of all installed Bespoke packages.
+Use `python -m pip` with the interpreter used by your app or notebook, and check
+for old editable checkouts or a local `bespokelabs.py` if imports fail.
+
 With a specific backend:
 
 ```bash
