@@ -55,6 +55,8 @@ bespokelabs-sandbox-api = "bespokelabs.sandbox.control_plane.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["bespokelabs.sandbox*"]
+namespaces = true
 
 [tool.setuptools.package-data]
 "bespokelabs.sandbox" = ["pricing.json"]
