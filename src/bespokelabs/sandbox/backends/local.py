@@ -53,9 +53,10 @@ class LocalClient:
     def resume(self, data: dict) -> LocalSession:
         workdir = data.get("workdir")
         if not workdir or not os.path.isdir(workdir):
+            # Chained so callers can tell "gone" from other resume failures.
             raise SandboxCreationError(
                 f"Cannot resume local sandbox: workdir '{workdir}' does not exist"
-            )
+            ) from FileNotFoundError(workdir)
         return LocalSession(
             workdir=workdir,
             owns_workdir=bool(data.get("owns_workdir", False)),

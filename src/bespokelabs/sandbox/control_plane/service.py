@@ -102,9 +102,14 @@ class ControlPlane:
         self._customer_markup = Decimal(customer_markup)
         if self._customer_markup < 0:
             raise ValueError("customer_markup must be non-negative")
-        self._allowed_backends = set(
-            BACKENDS if allowed_backends is None else allowed_backends
-        )
+        # Job-only backends (no interactive sessions) are never a default.
+        if allowed_backends is None:
+            allowed_backends = [
+                name
+                for name, cls in BACKENDS.items()
+                if getattr(cls, "supports_sessions", True)
+            ]
+        self._allowed_backends = set(allowed_backends)
         self._runtimes: dict[str, SandboxRuntime] = {}
         self._provider_reconcilers = provider_reconcilers or {}
         self._provider_settings = {

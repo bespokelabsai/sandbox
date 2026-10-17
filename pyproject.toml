@@ -11,7 +11,7 @@ dependencies = [
 authors = [
     { name = "Bespoke Labs" },
 ]
-keywords = ["sandbox", "cloud", "daytona", "modal", "runpod", "e2b", "tensorlake", "docker", "ray", "safehouse", "bespokelabs"]
+keywords = ["sandbox", "cloud", "daytona", "modal", "runpod", "e2b", "tensorlake", "docker", "ray", "safehouse", "gcp-batch", "bespokelabs"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -30,6 +30,7 @@ modal = ["modal>=0.60.0"]
 e2b = ["e2b-code-interpreter>=1.0.0"]
 docker = ["docker>=7.0.0"]
 ray = ["ray>=2.0.0"]
+gcp-batch = ["google-cloud-batch>=0.17.0", "google-cloud-logging>=3.0.0"]
 server = ["fastapi>=0.115.0", "uvicorn>=0.30.0"]
 all = [
     "daytona>=0.207.0",
@@ -38,6 +39,8 @@ all = [
     "e2b-code-interpreter>=1.0.0",
     "docker>=7.0.0",
     "ray>=2.0.0",
+    "google-cloud-batch>=0.17.0",
+    "google-cloud-logging>=3.0.0",
 ]
 dev = [
     "httpx>=0.27.0,<1",
