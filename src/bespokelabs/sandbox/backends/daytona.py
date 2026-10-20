@@ -25,6 +25,7 @@ from bespokelabs.sandbox.exceptions import (
     SandboxTimeoutError,
 )
 from bespokelabs.sandbox.types import (
+    ExposedPort,
     FileInfo,
     SandboxConfig,
     SandboxResult,
@@ -502,6 +503,20 @@ class DaytonaSession:
             raise SandboxExecutionError(
                 f"Daytona download_file failed: {exc}"
             ) from exc
+
+    def expose_port(self, port: int) -> ExposedPort:
+        """Return the port's preview link; the sandbox stays private.
+
+        A private sandbox answers 401 unless the request carries the preview
+        token, so the token goes in the returned headers.
+        """
+        try:
+            link = self._sandbox.get_preview_link(port)
+        except Exception as exc:
+            raise _classify_daytona_error(exc, op="expose_port") from exc
+        token = getattr(link, "token", None)
+        headers = {"X-Daytona-Preview-Token": token} if token else {}
+        return ExposedPort(port=port, url=link.url, headers=headers)
 
     def snapshot(self) -> SnapshotInfo:
         raise FeatureNotSupportedError(

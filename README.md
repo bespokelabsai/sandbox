@@ -627,6 +627,34 @@ require parent directories to exist, so create them before writing nested paths.
 On macOS, `COPYFILE_DISABLE=1` avoids AppleDouble metadata files in local tar
 downloads.
 
+### Exposing ports
+
+`expose_port(port)` returns an `ExposedPort` with a `url` that reaches a server
+listening on that port inside the sandbox, plus any `headers` the request
+needs:
+
+```python
+import httpx
+
+sb.execute_command("nohup python3 -m http.server 8080 >/dev/null 2>&1 &")
+exposed = sb.expose_port(8080)
+httpx.get(exposed.url, headers=exposed.headers)
+```
+
+The URLs are authenticated where the provider supports it. Daytona returns the
+sandbox's preview link and keeps the sandbox private, so the link answers 401
+without the `X-Daytona-Preview-Token` header in `headers`. E2B returns the
+`get_host` address, and adds its traffic access token to `headers` when the
+sandbox was created with restricted public traffic. Treat `headers` as a
+secret; it is left out of `repr`.
+
+Docker and Modal can only open ports at creation, and their URLs carry no
+authentication. On Docker, publish the port with
+`backend_options={"ports": {"8080/tcp": ("127.0.0.1", None)}}`; the URL points
+at the host side of that mapping. On Modal, pass
+`backend_options={"encrypted_ports": [8080]}`; the URL is the tunnel address.
+Other backends raise `FeatureNotSupportedError`.
+
 ### Declarative workspaces
 
 `files=`, `git_repo=`, and `upload_dir()` cover the imperative cases. For
@@ -1236,6 +1264,7 @@ accepts `-c`; use shell commands for other language runtimes.
 | `upload_file` | `shutil.copy` | `shutil.copy` | `put_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
 | `download_file` | `shutil.copy` | `shutil.copy` | `get_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
 | `snapshot` | No | No | Yes | No | No | Yes | Yes | No | No |
+| `expose_port` | No | No | Published port | No | Preview link + token | No | Tunnel | No | `get_host` |
 | Resource limits | No | No | cpu, memory | cpu (Ray) | cpu, memory, disk | cpu, memory | cpu, memory, gpu | cpu, memory, disk, gpu | Tier-based |
 | `allow_internet=False` | Ignored | Ignored | Yes | Ignored | Ignored | Yes | Ignored | Rejected | Ignored |
 | Isolation | Process-level | macOS `sandbox-exec` | Container | Process | Full VM | Container | Container | Container | Full VM |

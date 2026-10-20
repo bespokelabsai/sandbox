@@ -50,6 +50,7 @@ from bespokelabs.sandbox.remote import (
 from bespokelabs.sandbox.sandbox import Sandbox, SandboxClient, json_schema
 from bespokelabs.sandbox.types import (
     AgentRunResult,
+    ExposedPort,
     FileInfo,
     SandboxConfig,
     SandboxResult,
@@ -89,6 +90,7 @@ __all__ = [
     "SandboxSessionState",
     "FileInfo",
     "SnapshotInfo",
+    "ExposedPort",
     "Usage",
     "AgentRunResult",
     "build_files_map",

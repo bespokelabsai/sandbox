@@ -28,6 +28,7 @@ from bespokelabs.sandbox.backends import BACKENDS
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     CommandFailedError,
+    FeatureNotSupportedError,
     SandboxConfigurationError,
     SandboxCreationError,
     SandboxError,
@@ -45,6 +46,7 @@ from bespokelabs.sandbox.protocols import (
 )
 from bespokelabs.sandbox.types import (
     AgentRunResult,
+    ExposedPort,
     FileInfo,
     SandboxConfig,
     SandboxResult,
@@ -380,6 +382,38 @@ class Sandbox:
         return _transfer.download_dir(
             self, remote_dir, local_dir, method=method
         )
+
+    # -- Ports -------------------------------------------------------------
+
+    def expose_port(self, port: int) -> ExposedPort:
+        """Return a URL that reaches *port* inside the sandbox from outside.
+
+        Send the returned ``headers`` with each request. On Daytona, and on
+        E2B sandboxes with restricted public traffic, they carry the access
+        token and the URL is useless without them. Docker and Modal URLs are
+        not authenticated, and both need the port opened at creation through
+        ``backend_options``.  Raises FeatureNotSupportedError on backends
+        that cannot expose ports.
+        """
+        self._check_alive()
+        if (
+            isinstance(port, bool)
+            or not isinstance(port, int)
+            or not 1 <= port <= 65535
+        ):
+            raise SandboxConfigurationError(
+                f"port must be an int between 1 and 65535, got {port!r}",
+                backend=self._config.backend,
+                op="expose_port",
+            )
+        expose = getattr(self._session, "expose_port", None)
+        if expose is None:
+            raise FeatureNotSupportedError(
+                f"Backend '{self._config.backend}' cannot expose ports",
+                backend=self._config.backend,
+                op="expose_port",
+            )
+        return expose(port)
 
     # -- Lifecycle ---------------------------------------------------------
 

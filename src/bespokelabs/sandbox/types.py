@@ -154,6 +154,20 @@ class SnapshotInfo:
 
 
 @dataclass
+class ExposedPort:
+    """A URL that reaches a port inside the sandbox from outside it.
+
+    Send ``headers`` with every request. Where the provider authenticates the
+    URL they carry its access token, so treat them as a secret; they are left
+    out of ``repr``.
+    """
+
+    port: int
+    url: str
+    headers: dict[str, str] = field(default_factory=dict, repr=False)
+
+
+@dataclass
 class SandboxSessionState:
     """Serializable handle to a *running* sandbox.
 

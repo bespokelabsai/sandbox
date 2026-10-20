@@ -10,10 +10,12 @@ import threading
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
+    SandboxConfigurationError,
     SandboxCreationError,
     SandboxExecutionError,
 )
 from bespokelabs.sandbox.types import (
+    ExposedPort,
     FileInfo,
     SandboxConfig,
     SandboxResult,
@@ -262,6 +264,33 @@ class DockerSession:
             raise SandboxExecutionError(
                 f"Docker download_file failed: {exc}"
             ) from exc
+
+    def expose_port(self, port: int) -> ExposedPort:
+        """Return the host address of a port published at creation."""
+        try:
+            self._container.reload()
+            bindings = (self._container.ports or {}).get(f"{port}/tcp")
+        except Exception as exc:
+            raise SandboxExecutionError(
+                f"Docker port lookup failed: {exc}"
+            ) from exc
+        if not bindings:
+            raise SandboxConfigurationError(
+                f"Port {port} is not published; create the sandbox with "
+                f"backend_options={{'ports': {{'{port}/tcp': "
+                f"('127.0.0.1', None)}}}}",
+                backend="docker",
+                op="expose_port",
+            )
+        binding = bindings[0]
+        host = binding.get("HostIp") or "127.0.0.1"
+        if host in ("0.0.0.0", "::"):
+            host = "127.0.0.1"
+        if ":" in host:
+            host = f"[{host}]"
+        return ExposedPort(
+            port=port, url=f"http://{host}:{binding['HostPort']}"
+        )
 
     def snapshot(self) -> SnapshotInfo:
         try:

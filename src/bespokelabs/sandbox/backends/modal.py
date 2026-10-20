@@ -6,10 +6,12 @@ import pathlib
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
+    SandboxConfigurationError,
     SandboxCreationError,
     SandboxExecutionError,
 )
 from bespokelabs.sandbox.types import (
+    ExposedPort,
     FileInfo,
     SandboxConfig,
     SandboxResult,
@@ -185,6 +187,24 @@ class ModalSession:
             raise SandboxExecutionError(
                 f"Modal download_file failed: {exc}"
             ) from exc
+
+    def expose_port(self, port: int) -> ExposedPort:
+        """Return the tunnel URL for a port opened at creation."""
+        try:
+            tunnels = self._sandbox.tunnels()
+        except Exception as exc:
+            raise SandboxExecutionError(
+                f"Modal tunnel lookup failed: {exc}"
+            ) from exc
+        tunnel = tunnels.get(port)
+        if tunnel is None:
+            raise SandboxConfigurationError(
+                f"Modal opens ports only at creation; pass "
+                f"backend_options={{'encrypted_ports': [{port}]}}",
+                backend="modal",
+                op="expose_port",
+            )
+        return ExposedPort(port=port, url=tunnel.url)
 
     def snapshot(self) -> SnapshotInfo:
         try:

@@ -33,6 +33,7 @@ from bespokelabs.sandbox.protocols import SandboxBackendClient
 from bespokelabs.sandbox.sandbox import Sandbox
 from bespokelabs.sandbox.types import (
     AgentRunResult,
+    ExposedPort,
     FileInfo,
     SandboxResult,
     SandboxSessionState,
@@ -239,6 +240,10 @@ class AsyncSandbox:
         )
 
     # -- Lifecycle ---------------------------------------------------------
+
+    async def expose_port(self, port: int) -> ExposedPort:
+        """Async version of :meth:`Sandbox.expose_port`."""
+        return await asyncio.to_thread(self._sandbox.expose_port, port)
 
     async def snapshot(self) -> SnapshotInfo:
         """Async version of :meth:`Sandbox.snapshot`."""
