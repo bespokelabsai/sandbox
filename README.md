@@ -464,6 +464,8 @@ sb = Sandbox(
     gpu=None,             # GPU type/count (Modal, RunPod)
     timeout_secs=None,    # Omitted: preset default, otherwise 600 seconds
     image=None,           # OCI image, or Tensorlake project image name
+    dockerfile=None,      # Local Dockerfile to build instead of image (Docker, Daytona, Modal)
+    context_dir=None,     # Build context for dockerfile (default: its directory)
     template=None,        # Template ID (E2B, RunPod)
     env_vars=None,        # dict of environment variables
     allow_internet=True,  # Mapped by Docker and Tensorlake; rejected if false on RunPod
@@ -530,6 +532,28 @@ Constructing a `Sandbox` creates the underlying sandbox immediately. To launch
 many sandboxes on one backend, or to use `async`/`await`, see
 [Reusing a client across many sandboxes](#reusing-a-client-across-many-sandboxes)
 and [Async](#async).
+
+### Building from a Dockerfile
+
+Pass a local Dockerfile instead of an image name. The build context defaults
+to the Dockerfile's directory:
+
+```python
+with Sandbox("daytona", dockerfile="env/Dockerfile") as sb:
+    sb.execute_command("cat /etc/os-release")
+
+with Sandbox("docker", dockerfile="env/Dockerfile", context_dir=".") as sb:
+    ...
+```
+
+Docker builds the image with the local daemon and leaves it untagged. Daytona
+builds it declaratively (`Image.from_dockerfile`) as part of the create call,
+so raise `backend_options={"create_timeout": ...}` for slow builds; it uses the
+Dockerfile's directory as the context and rejects any other `context_dir`.
+Modal uses `Image.from_dockerfile`. `dockerfile` cannot be combined with
+`image` or `snapshot_id`, and with a preset it replaces the preset image, so
+the preset's setup commands run. Other backends raise
+`FeatureNotSupportedError`.
 
 ### Executing Code
 
@@ -1236,6 +1260,7 @@ accepts `-c`; use shell commands for other language runtimes.
 | `upload_file` | `shutil.copy` | `shutil.copy` | `put_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
 | `download_file` | `shutil.copy` | `shutil.copy` | `get_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
 | `snapshot` | No | No | Yes | No | No | Yes | Yes | No | No |
+| `dockerfile=` | Rejected | Rejected | Local build | Rejected | Declarative build | Rejected | `Image.from_dockerfile` | Rejected | Rejected |
 | Resource limits | No | No | cpu, memory | cpu (Ray) | cpu, memory, disk | cpu, memory | cpu, memory, gpu | cpu, memory, disk, gpu | Tier-based |
 | `allow_internet=False` | Ignored | Ignored | Yes | Ignored | Ignored | Yes | Ignored | Rejected | Ignored |
 | Isolation | Process-level | macOS `sandbox-exec` | Container | Process | Full VM | Container | Container | Container | Full VM |

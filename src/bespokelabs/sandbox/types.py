@@ -19,6 +19,10 @@ class SandboxConfig:
       - image: Modal, Daytona, RunPod (OCI image), Docker
                (e.g. "python:3.12-slim"),
                Tensorlake (project-scoped image name, e.g. "tensorlake/ubuntu-minimal")
+      - dockerfile / context_dir: Docker (local build), Daytona (declarative
+        build), Modal (``Image.from_dockerfile``).  Local paths; the context
+        defaults to the Dockerfile's directory.  Mutually exclusive with
+        ``image`` and ``snapshot_id``.
       - template: E2B and RunPod
       - app_name: Modal only
       - allow_internet: Tensorlake, Daytona, Docker
@@ -48,6 +52,8 @@ class SandboxConfig:
     timeout_secs: int = 600
     timeout_secs_explicit: bool = False
     image: str | None = None
+    dockerfile: str | None = None
+    context_dir: str | None = None
     env_vars: dict[str, str] = field(default_factory=dict)
     allow_internet: bool = True
     app_name: str | None = None

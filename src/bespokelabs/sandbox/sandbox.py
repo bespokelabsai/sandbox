@@ -28,6 +28,7 @@ from bespokelabs.sandbox.backends import BACKENDS
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     CommandFailedError,
+    FeatureNotSupportedError,
     SandboxConfigurationError,
     SandboxCreationError,
     SandboxError,
@@ -95,6 +96,8 @@ class Sandbox:
         gpu: str | None = None,
         timeout_secs: int | None = None,
         image: str | None = None,
+        dockerfile: str | Path | None = None,
+        context_dir: str | Path | None = None,
         env_vars: dict[str, str] | None = None,
         allow_internet: bool | None = None,
         app_name: str | None = None,
@@ -117,6 +120,14 @@ class Sandbox:
                 context={"backend": backend},
             )
 
+        dockerfile_path, context_path = _resolve_dockerfile(
+            backend,
+            dockerfile,
+            context_dir,
+            image=image,
+            snapshot_id=snapshot_id,
+        )
+
         # Resolve preset
         resolved_preset: SandboxPreset | None = None
         if isinstance(preset, str):
@@ -135,6 +146,9 @@ class Sandbox:
                 preset_image_for_backend = resolved_preset.tensorlake_image
             elif backend != "runpod":
                 preset_image_for_backend = resolved_preset.image
+        if dockerfile_path is not None:
+            # The Dockerfile replaces the preset image; setup commands run.
+            preset_image_for_backend = None
 
         # Merge: explicit kwargs override preset defaults.  Without a
         # preset, an empty SandboxPreset supplies the standard defaults.
@@ -156,6 +170,8 @@ class Sandbox:
             else defaults.timeout_secs,
             timeout_secs_explicit=timeout_secs is not None,
             image=image if image is not None else preset_image_for_backend,
+            dockerfile=dockerfile_path,
+            context_dir=context_path,
             env_vars={**defaults.env_vars, **(env_vars or {})},
             allow_internet=allow_internet
             if allow_internet is not None
@@ -174,6 +190,15 @@ class Sandbox:
         )
         self._destroyed = False
         self._usage = Usage()
+
+        if dockerfile_path is not None and not getattr(
+            backend_client, "supports_dockerfile", False
+        ):
+            raise FeatureNotSupportedError(
+                f"Backend '{backend}' cannot build from a Dockerfile; use image=",
+                backend=backend,
+                op="create",
+            )
 
         try:
             self._session: SandboxBackendSession = backend_client.create(
@@ -718,6 +743,8 @@ class SandboxClient:
         gpu: str | None = None,
         timeout_secs: int | None = None,
         image: str | None = None,
+        dockerfile: str | Path | None = None,
+        context_dir: str | Path | None = None,
         env_vars: dict[str, str] | None = None,
         allow_internet: bool | None = None,
         app_name: str | None = None,
@@ -743,6 +770,8 @@ class SandboxClient:
             gpu=gpu,
             timeout_secs=timeout_secs,
             image=image,
+            dockerfile=dockerfile,
+            context_dir=context_dir,
             env_vars=env_vars,
             allow_internet=allow_internet,
             app_name=app_name,
@@ -767,6 +796,53 @@ class SandboxClient:
         return Sandbox._resume_with(
             self._backend_name, self._backend_client, state
         )
+
+
+def _resolve_dockerfile(
+    backend: str,
+    dockerfile: str | Path | None,
+    context_dir: str | Path | None,
+    *,
+    image: str | None,
+    snapshot_id: str | None,
+) -> tuple[str | None, str | None]:
+    """Validate the Dockerfile arguments and return absolute local paths.
+
+    The build context defaults to the Dockerfile's directory.
+    """
+    if dockerfile is None:
+        if context_dir is not None:
+            raise SandboxConfigurationError(
+                "context_dir requires dockerfile",
+                backend=backend,
+                op="create",
+            )
+        return None, None
+    if image is not None or snapshot_id is not None:
+        raise SandboxConfigurationError(
+            "dockerfile cannot be combined with image or snapshot_id",
+            backend=backend,
+            op="create",
+        )
+    dockerfile_path = Path(dockerfile).expanduser().resolve()
+    if not dockerfile_path.is_file():
+        raise SandboxConfigurationError(
+            f"Dockerfile not found: {dockerfile}",
+            backend=backend,
+            op="create",
+        )
+    context_path = (
+        Path(context_dir).expanduser().resolve()
+        if context_dir is not None
+        else dockerfile_path.parent
+    )
+    if not context_path.is_dir():
+        raise SandboxConfigurationError(
+            f"Build context is not a directory: {context_dir}",
+            backend=backend,
+            op="create",
+        )
+    return str(dockerfile_path), str(context_path)
 
 
 # -- Structured output parsing ------------------------------------------------

@@ -20,6 +20,8 @@ from bespokelabs.sandbox.types import (
 class ModalClient:
     """Factory for Modal sandboxes."""
 
+    supports_dockerfile = True
+
     def __init__(self) -> None:
         try:
             import modal  # type: ignore[import-untyped]
@@ -47,6 +49,11 @@ class ModalClient:
 
             if config.image:
                 create_kwargs["image"] = modal.Image.from_registry(config.image)
+
+            if config.dockerfile:
+                create_kwargs["image"] = modal.Image.from_dockerfile(
+                    config.dockerfile, context_dir=config.context_dir
+                )
 
             if config.snapshot_id:
                 create_kwargs["image"] = modal.Image.from_id(config.snapshot_id)

@@ -30,6 +30,8 @@ class DockerClient:
     for every subsequent session created through this client.
     """
 
+    supports_dockerfile = True
+
     def __init__(self) -> None:
         try:
             import docker  # type: ignore[import-untyped]
@@ -72,17 +74,11 @@ class DockerClient:
     def create(self, config: SandboxConfig) -> DockerSession:
         self._connect()
 
-        image = config.image or _DEFAULT_IMAGE
-
-        try:
-            self._client.images.get(image)
-        except Exception:
-            try:
-                self._client.images.pull(image)
-            except Exception as exc:
-                raise SandboxCreationError(
-                    f"Failed to pull Docker image '{image}': {exc}"
-                ) from exc
+        if config.dockerfile:
+            image = self._build(config.dockerfile, config.context_dir)
+        else:
+            image = config.image or _DEFAULT_IMAGE
+            self._ensure_image(image)
 
         create_kwargs: dict = {
             "image": image,
@@ -111,6 +107,34 @@ class DockerClient:
             ) from exc
 
         return DockerSession(container=container, timeout=config.timeout_secs)
+
+    def _ensure_image(self, image: str) -> None:
+        try:
+            self._client.images.get(image)
+        except Exception:
+            try:
+                self._client.images.pull(image)
+            except Exception as exc:
+                raise SandboxCreationError(
+                    f"Failed to pull Docker image '{image}': {exc}"
+                ) from exc
+
+    def _build(self, dockerfile: str, context_dir: str | None) -> str:
+        """Build *dockerfile* locally and return the image id.
+
+        The image is left untagged; the daemon's layer cache makes a rebuild
+        of an unchanged Dockerfile cheap.
+        """
+        context = context_dir or os.path.dirname(dockerfile)
+        try:
+            image, _ = self._client.images.build(
+                path=context, dockerfile=dockerfile, rm=True, forcerm=True
+            )
+        except Exception as exc:
+            raise SandboxCreationError(
+                f"Failed to build Docker image from '{dockerfile}': {exc}"
+            ) from exc
+        return image.id
 
 
 class DockerSession:
