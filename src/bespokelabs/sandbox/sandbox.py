@@ -28,6 +28,7 @@ from bespokelabs.sandbox.backends import BACKENDS
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     CommandFailedError,
+    FeatureNotSupportedError,
     SandboxConfigurationError,
     SandboxCreationError,
     SandboxError,
@@ -46,6 +47,7 @@ from bespokelabs.sandbox.protocols import (
 from bespokelabs.sandbox.types import (
     AgentRunResult,
     FileInfo,
+    NetworkPolicy,
     SandboxConfig,
     SandboxResult,
     SandboxSessionState,
@@ -97,6 +99,7 @@ class Sandbox:
         image: str | None = None,
         env_vars: dict[str, str] | None = None,
         allow_internet: bool | None = None,
+        network: NetworkPolicy | None = None,
         app_name: str | None = None,
         template: str | None = None,
         snapshot_id: str | None = None,
@@ -116,6 +119,8 @@ class Sandbox:
                 f"Unknown backend '{backend}'. Choose from: {', '.join(BACKENDS)}",
                 context={"backend": backend},
             )
+
+        _check_network_args(backend, network, allow_internet)
 
         # Resolve preset
         resolved_preset: SandboxPreset | None = None
@@ -157,9 +162,10 @@ class Sandbox:
             timeout_secs_explicit=timeout_secs is not None,
             image=image if image is not None else preset_image_for_backend,
             env_vars={**defaults.env_vars, **(env_vars or {})},
-            allow_internet=allow_internet
-            if allow_internet is not None
-            else defaults.allow_internet,
+            allow_internet=_allow_internet(
+                network, allow_internet, defaults.allow_internet
+            ),
+            network=network,
             app_name=app_name,
             template=template,
             snapshot_id=snapshot_id,
@@ -174,6 +180,18 @@ class Sandbox:
         )
         self._destroyed = False
         self._usage = Usage()
+
+        if (
+            network is not None
+            and network.mode != "public"
+            and network.mode not in getattr(backend_client, "network_modes", ())
+        ):
+            raise FeatureNotSupportedError(
+                f"Backend '{backend}' cannot enforce network mode "
+                f"'{network.mode}'",
+                backend=backend,
+                op="create",
+            )
 
         try:
             self._session: SandboxBackendSession = backend_client.create(
@@ -380,6 +398,32 @@ class Sandbox:
         return _transfer.download_dir(
             self, remote_dir, local_dir, method=method
         )
+
+    # -- Network -----------------------------------------------------------
+
+    def set_network(self, policy: NetworkPolicy) -> None:
+        """Replace the outbound network policy of the running sandbox.
+
+        Raises FeatureNotSupportedError when the backend cannot change the
+        policy after creation or cannot enforce this one.
+        """
+        self._check_alive()
+        if not isinstance(policy, NetworkPolicy):
+            raise SandboxConfigurationError(
+                "set_network() takes a NetworkPolicy",
+                backend=self._config.backend,
+                op="set_network",
+            )
+        setter = getattr(self._session, "set_network", None)
+        if setter is None:
+            raise FeatureNotSupportedError(
+                f"Backend '{self._config.backend}' cannot change the network "
+                "policy of a running sandbox",
+                backend=self._config.backend,
+                op="set_network",
+            )
+        setter(policy)
+        self._config.network = policy
 
     # -- Lifecycle ---------------------------------------------------------
 
@@ -720,6 +764,7 @@ class SandboxClient:
         image: str | None = None,
         env_vars: dict[str, str] | None = None,
         allow_internet: bool | None = None,
+        network: NetworkPolicy | None = None,
         app_name: str | None = None,
         template: str | None = None,
         snapshot_id: str | None = None,
@@ -745,6 +790,7 @@ class SandboxClient:
             image=image,
             env_vars=env_vars,
             allow_internet=allow_internet,
+            network=network,
             app_name=app_name,
             template=template,
             snapshot_id=snapshot_id,
@@ -767,6 +813,38 @@ class SandboxClient:
         return Sandbox._resume_with(
             self._backend_name, self._backend_client, state
         )
+
+
+def _check_network_args(
+    backend: str,
+    network: NetworkPolicy | None,
+    allow_internet: bool | None,
+) -> None:
+    if network is None:
+        return
+    if not isinstance(network, NetworkPolicy):
+        raise SandboxConfigurationError(
+            "network must be a NetworkPolicy",
+            backend=backend,
+            op="create",
+        )
+    if allow_internet is not None:
+        raise SandboxConfigurationError(
+            "Pass either network or allow_internet, not both",
+            backend=backend,
+            op="create",
+        )
+
+
+def _allow_internet(
+    network: NetworkPolicy | None,
+    allow_internet: bool | None,
+    default: bool,
+) -> bool:
+    """Derive the legacy flag, so adapters that only read it still block."""
+    if network is not None:
+        return network.mode != "none"
+    return allow_internet if allow_internet is not None else default
 
 
 # -- Structured output parsing ------------------------------------------------

@@ -51,6 +51,7 @@ from bespokelabs.sandbox.sandbox import Sandbox, SandboxClient, json_schema
 from bespokelabs.sandbox.types import (
     AgentRunResult,
     FileInfo,
+    NetworkPolicy,
     SandboxConfig,
     SandboxResult,
     SandboxSessionState,
@@ -85,6 +86,7 @@ __all__ = [
     "AgentInputMode",
     "SandboxPreset",
     "SandboxConfig",
+    "NetworkPolicy",
     "SandboxResult",
     "SandboxSessionState",
     "FileInfo",

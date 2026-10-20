@@ -43,6 +43,9 @@ class TensorlakeClient:
         # guard the one-time SDK client construction.
         self._connect_lock = threading.Lock()
 
+    # "none" is enforced through the derived allow_internet flag.
+    network_modes = frozenset({"public", "none"})
+
     def _ensure_client(self) -> object:
         if self._client is None:
             with self._connect_lock:

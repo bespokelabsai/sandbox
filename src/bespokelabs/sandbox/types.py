@@ -2,8 +2,60 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from dataclasses import dataclass, field
+from typing import Literal
+
+from bespokelabs.sandbox.exceptions import SandboxConfigurationError
+
+NetworkMode = Literal["public", "none", "allowlist"]
+
+
+def _as_tuple(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    return tuple(value)  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True)
+class NetworkPolicy:
+    """Outbound network policy for a sandbox.
+
+    ``public`` allows all egress, ``none`` blocks it, and ``allowlist``
+    allows only ``domains`` and ``cidrs``.  Pass it as ``network=`` at
+    creation or to ``Sandbox.set_network()``.  A backend that cannot enforce
+    the requested policy raises instead of ignoring it.
+    """
+
+    mode: NetworkMode = "public"
+    domains: tuple[str, ...] = ()
+    cidrs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "domains", _as_tuple(self.domains))
+        object.__setattr__(self, "cidrs", _as_tuple(self.cidrs))
+        if self.mode not in ("public", "none", "allowlist"):
+            raise SandboxConfigurationError(
+                f"Unknown network mode {self.mode!r}; use 'public', 'none' "
+                "or 'allowlist'"
+            )
+        if self.mode == "allowlist":
+            if not self.domains and not self.cidrs:
+                raise SandboxConfigurationError(
+                    "An allowlist policy needs at least one domain or CIDR"
+                )
+        elif self.domains or self.cidrs:
+            raise SandboxConfigurationError(
+                "domains and cidrs apply only to mode='allowlist'"
+            )
+        for cidr in self.cidrs:
+            try:
+                ipaddress.ip_network(cidr, strict=False)
+            except ValueError as exc:
+                raise SandboxConfigurationError(
+                    f"Invalid CIDR {cidr!r}: {exc}"
+                ) from exc
 
 
 @dataclass
@@ -21,7 +73,12 @@ class SandboxConfig:
                Tensorlake (project-scoped image name, e.g. "tensorlake/ubuntu-minimal")
       - template: E2B and RunPod
       - app_name: Modal only
-      - allow_internet: Tensorlake, Daytona, Docker
+      - allow_internet: legacy best-effort flag, mapped by Docker and
+        Tensorlake, rejected when false on RunPod, ignored elsewhere.  Prefer
+        ``network``.  When ``network`` is set this is derived from it.
+      - network: enforced egress policy (``NetworkPolicy``). Daytona and
+        Modal support every mode, Docker and Tensorlake ``public`` and
+        ``none``; anything a backend cannot enforce raises.
       - snapshot_id: Tensorlake, Modal
       - env_vars: all backends
       - timeout_secs: all backends (local and ray use subprocess timeout)
@@ -50,6 +107,7 @@ class SandboxConfig:
     image: str | None = None
     env_vars: dict[str, str] = field(default_factory=dict)
     allow_internet: bool = True
+    network: NetworkPolicy | None = None
     app_name: str | None = None
     template: str | None = None
     snapshot_id: str | None = None

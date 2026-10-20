@@ -466,7 +466,8 @@ sb = Sandbox(
     image=None,           # OCI image, or Tensorlake project image name
     template=None,        # Template ID (E2B, RunPod)
     env_vars=None,        # dict of environment variables
-    allow_internet=True,  # Mapped by Docker and Tensorlake; rejected if false on RunPod
+    allow_internet=True,  # Legacy best-effort flag; prefer network= (see Network policy)
+    network=None,         # NetworkPolicy: enforced egress policy, or an error
     app_name=None,        # App name (Modal)
     snapshot_id=None,     # Restore from snapshot (Tensorlake, Modal, Daytona)
     workdir=None,         # Sandbox root or command working directory
@@ -1049,6 +1050,38 @@ code and file APIs keep provider path semantics. RunPod defaults command
 execution to `/workspace`, while its file helpers use SSH path semantics.
 Docker, Modal, E2B, and Ray do not map the top-level `workdir` option.
 
+### Network policy
+
+`network=` sets an egress policy that the backend enforces or refuses:
+
+```python
+from bespokelabs.sandbox import NetworkPolicy, Sandbox
+
+hub_only = NetworkPolicy(mode="allowlist", domains=["8080-abc.daytonaproxy01.net"])
+with Sandbox("daytona", network=hub_only) as sb:
+    ...
+    sb.set_network(NetworkPolicy(mode="none"))    # cut egress mid-run
+    sb.set_network(NetworkPolicy())               # back to public
+```
+
+`mode` is `"public"` (the default), `"none"`, or `"allowlist"` with `domains`
+and/or `cidrs`. A backend that cannot enforce the requested mode raises
+`FeatureNotSupportedError` instead of creating an open sandbox. `public` is
+accepted everywhere.
+
+- Daytona: every mode, at creation and through `set_network()`. Allow-lists
+  take domains or IPv4 CIDRs, not both. Preview hosts share proxy IPs, so a
+  CIDR that reaches one preview host reaches all of them; allow a preview host
+  by domain, which Daytona filters by SNI.
+- Modal: every mode at creation (`block_network`, `outbound_cidr_allowlist`,
+  `outbound_domain_allowlist`). `set_network()` uses Modal's experimental
+  outbound policy API and supports `public` and `allowlist`, not `none`.
+- Docker and Tensorlake: `public` and `none` at creation.
+
+`allow_internet` keeps its old best-effort behavior (see the matrix) for
+compatibility. Passing both `network` and `allow_internet` is an error; with
+`network`, `allow_internet` is derived from it.
+
 ### Backend-specific options
 
 `backend_options` is an escape hatch: the dict is merged into the backend's
@@ -1237,7 +1270,9 @@ accepts `-c`; use shell commands for other language runtimes.
 | `download_file` | `shutil.copy` | `shutil.copy` | `get_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
 | `snapshot` | No | No | Yes | No | No | Yes | Yes | No | No |
 | Resource limits | No | No | cpu, memory | cpu (Ray) | cpu, memory, disk | cpu, memory | cpu, memory, gpu | cpu, memory, disk, gpu | Tier-based |
-| `allow_internet=False` | Ignored | Ignored | Yes | Ignored | Ignored | Yes | Ignored | Rejected | Ignored |
+| `allow_internet=False` (legacy, prefer `network=`) | Ignored | Ignored | Yes | Ignored | Ignored | Yes | Ignored | Rejected | Ignored |
+| `network=` modes | public | public | public, none | public | all | public, none | all | public | public |
+| `set_network()` | No | No | No | No | Yes | No | public, allowlist | No | No |
 | Isolation | Process-level | macOS `sandbox-exec` | Container | Process | Full VM | Container | Container | Container | Full VM |
 | `gpu=` reservation | No | No | No | No | No | No | Yes | Yes | No |
 | Needs install | Nothing | `safehouse` CLI | Docker daemon | `ray` | API key | `tl login` | API key | API key + OpenSSH | API key |

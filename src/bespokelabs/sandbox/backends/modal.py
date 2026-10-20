@@ -6,11 +6,13 @@ import pathlib
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
+    FeatureNotSupportedError,
     SandboxCreationError,
     SandboxExecutionError,
 )
 from bespokelabs.sandbox.types import (
     FileInfo,
+    NetworkPolicy,
     SandboxConfig,
     SandboxResult,
     SnapshotInfo,
@@ -19,6 +21,8 @@ from bespokelabs.sandbox.types import (
 
 class ModalClient:
     """Factory for Modal sandboxes."""
+
+    network_modes = frozenset({"public", "none", "allowlist"})
 
     def __init__(self) -> None:
         try:
@@ -56,6 +60,8 @@ class ModalClient:
                     modal.Secret.from_dict(config.env_vars)
                 ]
 
+            create_kwargs.update(_network_kwargs(config.network))
+
             if config.backend_options:
                 create_kwargs.update(config.backend_options)
 
@@ -75,6 +81,20 @@ class ModalClient:
                 f"Cannot resume Modal sandbox '{data.get('sandbox_id')}': {exc}"
             ) from exc
         return ModalSession(sandbox=sandbox)
+
+
+def _network_kwargs(policy: NetworkPolicy | None) -> dict:
+    """Map a policy onto ``Sandbox.create`` keyword arguments."""
+    if policy is None or policy.mode == "public":
+        return {}
+    if policy.mode == "none":
+        return {"block_network": True}
+    kwargs: dict = {}
+    if policy.cidrs:
+        kwargs["outbound_cidr_allowlist"] = list(policy.cidrs)
+    if policy.domains:
+        kwargs["outbound_domain_allowlist"] = list(policy.domains)
+    return kwargs
 
 
 class ModalSession:
@@ -184,6 +204,38 @@ class ModalSession:
         except Exception as exc:
             raise SandboxExecutionError(
                 f"Modal download_file failed: {exc}"
+            ) from exc
+
+    def set_network(self, policy: NetworkPolicy) -> None:
+        """Replace the outbound policy via Modal's experimental API."""
+        setter = getattr(
+            self._sandbox, "_experimental_set_outbound_network_policy", None
+        )
+        if setter is None:
+            raise FeatureNotSupportedError(
+                "This Modal SDK cannot change the network policy of a "
+                "running sandbox",
+                backend="modal",
+                op="set_network",
+            )
+        if policy.mode == "none":
+            raise FeatureNotSupportedError(
+                "Modal blocks all egress only at creation; pass "
+                "network=NetworkPolicy(mode='none') to the constructor",
+                backend="modal",
+                op="set_network",
+            )
+        kwargs: dict = {}
+        if policy.mode == "allowlist":
+            kwargs = {
+                "outbound_cidr_allowlist": list(policy.cidrs) or None,
+                "outbound_domain_allowlist": list(policy.domains) or None,
+            }
+        try:
+            setter(**kwargs)
+        except Exception as exc:
+            raise SandboxExecutionError(
+                f"Modal set_network failed: {exc}"
             ) from exc
 
     def snapshot(self) -> SnapshotInfo:

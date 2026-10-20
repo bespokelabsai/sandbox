@@ -30,6 +30,9 @@ class DockerClient:
     for every subsequent session created through this client.
     """
 
+    # "none" is enforced through the derived allow_internet flag.
+    network_modes = frozenset({"public", "none"})
+
     def __init__(self) -> None:
         try:
             import docker  # type: ignore[import-untyped]
