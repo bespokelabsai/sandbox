@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from unittest import mock
 
 from bespokelabs.sandbox import NetworkPolicy, Sandbox
+from bespokelabs.sandbox.backends.daytona import DaytonaClient
 from bespokelabs.sandbox.backends.docker import DockerClient
 from bespokelabs.sandbox.backends.modal import ModalClient, ModalSession
+from bespokelabs.sandbox.backends.tensorlake import TensorlakeClient
 from bespokelabs.sandbox.exceptions import (
     FeatureNotSupportedError,
     SandboxConfigurationError,
@@ -23,7 +26,6 @@ except ImportError:  # pragma: no cover - exercised only without the extra
 
 if _HAS_DAYTONA:
     from bespokelabs.sandbox.backends.daytona import (
-        DaytonaClient,
         DaytonaSession,
         _build_params,
     )
@@ -56,12 +58,8 @@ class NetworkPolicyTests(unittest.TestCase):
 class SandboxNetworkArgsTests(unittest.TestCase):
 
     def _config(self, backend: object, **kwargs) -> SandboxConfig:
-        with mock.patch.dict(
-            "bespokelabs.sandbox.backends.BACKENDS",
-            {"docker": mock.Mock(return_value=backend)},
-        ):
-            with Sandbox("docker", **kwargs):
-                pass
+        with Sandbox("docker", _backend_client=backend, **kwargs):
+            pass
         return backend.create.call_args.args[0]
 
     def test_policy_reaches_config_and_derives_allow_internet(self) -> None:
@@ -85,6 +83,54 @@ class SandboxNetworkArgsTests(unittest.TestCase):
                 self._config(docker, network=DOMAINS)
             create.assert_not_called()
 
+    def test_network_backend_options_conflict_with_policy(self) -> None:
+        cases = {
+            DockerClient: [
+                "network_mode",
+                "network",
+                "network_disabled",
+                "networking_config",
+            ],
+            ModalClient: [
+                "block_network",
+                "outbound_cidr_allowlist",
+                "outbound_domain_allowlist",
+                "cidr_allowlist",
+            ],
+            TensorlakeClient: ["allow_internet_access"],
+            DaytonaClient: [
+                "network_block_all",
+                "network_allow_list",
+                "domain_allow_list",
+            ],
+        }
+        for client_cls, keys in cases.items():
+            for key in keys:
+                with self.subTest(client=client_cls.__name__, key=key):
+                    client = object.__new__(client_cls)
+                    with mock.patch.object(client_cls, "create") as create:
+                        with self.assertRaises(SandboxConfigurationError):
+                            Sandbox(
+                                "docker",
+                                network=NetworkPolicy(),
+                                backend_options={key: "x"},
+                                _backend_client=client,
+                            )
+                        create.assert_not_called()
+
+    def test_network_backend_options_still_pass_without_policy(self) -> None:
+        backend = mock.MagicMock()
+        config = self._config(backend, backend_options={"network_mode": "host"})
+        self.assertEqual(config.backend_options, {"network_mode": "host"})
+
+        backend = mock.MagicMock(
+            network_modes={"none"}, network_option_keys={"network_mode"}
+        )
+        config = self._config(
+            backend, network=NONE, backend_options={"ports": {"80/tcp": None}}
+        )
+        self.assertEqual(config.backend_options, {"ports": {"80/tcp": None}})
+
     def test_backend_without_network_support(self) -> None:
         with self.assertRaises(FeatureNotSupportedError):
             Sandbox("local", network=NONE)
@@ -102,7 +148,7 @@ class ModalNetworkTests(unittest.TestCase):
         return client._modal.Sandbox.create.call_args.kwargs
 
     def test_create_maps_each_mode(self) -> None:
-        self.assertTrue(self._create_kwargs(NONE)["block_network"])
+        self.assertIs(self._create_kwargs(NONE)["block_network"], True)
         self.assertEqual(
             self._create_kwargs(CIDRS)["outbound_cidr_allowlist"],
             ["10.0.0.0/8"],
@@ -129,6 +175,37 @@ class ModalNetworkTests(unittest.TestCase):
         with self.assertRaises(FeatureNotSupportedError):
             session.set_network(NONE)
 
+    def test_set_network_blocks_until_modal_applies_it(self) -> None:
+        # Drive the real synchronicity-wrapped modal.Sandbox, faking only the
+        # RPC, so a dropped coroutine would leave `sent` empty.
+        modal = __import__("modal")
+        from modal._utils.async_utils import synchronizer
+        from modal.sandbox import _sandbox
+
+        sent = []
+
+        class Router:
+
+            async def set_network_access(self, req):
+                await asyncio.sleep(0.05)
+                sent.append(req)
+
+        async def router(task_id):
+            return Router()
+
+        impl = object.__new__(_sandbox._Sandbox)
+        impl._task_id = "ta-1"
+        impl._get_command_router_client = router
+        sandbox = synchronizer._translate_out(impl)
+        self.assertIsInstance(sandbox, modal.Sandbox)
+
+        ModalSession(sandbox=sandbox).set_network(DOMAINS)
+
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(
+            list(sent[0].network_access.allowed_domains), ["hub.example"]
+        )
+
 
 @unittest.skipUnless(_HAS_DAYTONA, "Daytona SDK not installed")
 class DaytonaNetworkTests(unittest.TestCase):
@@ -138,7 +215,7 @@ class DaytonaNetworkTests(unittest.TestCase):
         return _build_params(config, create_token="tok")
 
     def test_create_maps_each_mode(self) -> None:
-        self.assertTrue(self._params(NONE).network_block_all)
+        self.assertIs(self._params(NONE).network_block_all, True)
         self.assertEqual(self._params(CIDRS).network_allow_list, "10.0.0.0/8")
         self.assertEqual(self._params(DOMAINS).domain_allow_list, "hub.example")
         public = self._params(NetworkPolicy())

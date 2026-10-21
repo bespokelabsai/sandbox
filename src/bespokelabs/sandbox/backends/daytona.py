@@ -136,6 +136,9 @@ class DaytonaClient:
     """
 
     network_modes = frozenset({"public", "none", "allowlist"})
+    network_option_keys = frozenset(
+        {"network_block_all", "network_allow_list", "domain_allow_list"}
+    )
 
     def __init__(self) -> None:
         try:

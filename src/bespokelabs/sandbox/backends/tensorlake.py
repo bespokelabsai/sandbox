@@ -45,6 +45,7 @@ class TensorlakeClient:
 
     # "none" is enforced through the derived allow_internet flag.
     network_modes = frozenset({"public", "none"})
+    network_option_keys = frozenset({"allow_internet_access"})
 
     def _ensure_client(self) -> object:
         if self._client is None:

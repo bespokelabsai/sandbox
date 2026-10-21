@@ -107,12 +107,13 @@ class SandboxConfig:
     image: str | None = None
     env_vars: dict[str, str] = field(default_factory=dict)
     allow_internet: bool = True
-    network: NetworkPolicy | None = None
     app_name: str | None = None
     template: str | None = None
     snapshot_id: str | None = None
     workdir: str | None = None
     backend_options: dict = field(default_factory=dict)
+    # New fields go last so positional construction keeps working.
+    network: NetworkPolicy | None = None
 
 
 @dataclass

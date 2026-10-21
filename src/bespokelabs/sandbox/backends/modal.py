@@ -23,6 +23,15 @@ class ModalClient:
     """Factory for Modal sandboxes."""
 
     network_modes = frozenset({"public", "none", "allowlist"})
+    # cidr_allowlist is the deprecated name of outbound_cidr_allowlist.
+    network_option_keys = frozenset(
+        {
+            "block_network",
+            "outbound_cidr_allowlist",
+            "outbound_domain_allowlist",
+            "cidr_allowlist",
+        }
+    )
 
     def __init__(self) -> None:
         try:

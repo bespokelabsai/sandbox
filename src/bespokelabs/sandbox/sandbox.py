@@ -120,7 +120,15 @@ class Sandbox:
                 context={"backend": backend},
             )
 
-        _check_network_args(backend, network, allow_internet)
+        _check_network_args(
+            backend,
+            network,
+            allow_internet,
+            backend_options,
+            _backend_client
+            if _backend_client is not None
+            else BACKENDS[backend],
+        )
 
         # Resolve preset
         resolved_preset: SandboxPreset | None = None
@@ -180,18 +188,6 @@ class Sandbox:
         )
         self._destroyed = False
         self._usage = Usage()
-
-        if (
-            network is not None
-            and network.mode != "public"
-            and network.mode not in getattr(backend_client, "network_modes", ())
-        ):
-            raise FeatureNotSupportedError(
-                f"Backend '{backend}' cannot enforce network mode "
-                f"'{network.mode}'",
-                backend=backend,
-                op="create",
-            )
 
         try:
             self._session: SandboxBackendSession = backend_client.create(
@@ -819,7 +815,14 @@ def _check_network_args(
     backend: str,
     network: NetworkPolicy | None,
     allow_internet: bool | None,
+    backend_options: dict | None,
+    capabilities: object,
 ) -> None:
+    """Validate ``network`` against the backend's class-level capabilities.
+
+    Runs before the adapter is built, so the answer does not depend on
+    whether the backend's SDK is installed.
+    """
     if network is None:
         return
     if not isinstance(network, NetworkPolicy):
@@ -831,6 +834,26 @@ def _check_network_args(
     if allow_internet is not None:
         raise SandboxConfigurationError(
             "Pass either network or allow_internet, not both",
+            backend=backend,
+            op="create",
+        )
+    if network.mode != "public" and network.mode not in getattr(
+        capabilities, "network_modes", ()
+    ):
+        raise FeatureNotSupportedError(
+            f"Backend '{backend}' cannot enforce network mode '{network.mode}'",
+            backend=backend,
+            op="create",
+        )
+    # backend_options merge last, so these keys would override the policy.
+    clashes = sorted(
+        set(backend_options or ())
+        & set(getattr(capabilities, "network_option_keys", ()))
+    )
+    if clashes:
+        raise SandboxConfigurationError(
+            f"backend_options {clashes} control networking and would "
+            "override network=; set the policy through network= only",
             backend=backend,
             op="create",
         )

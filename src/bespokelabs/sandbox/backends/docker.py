@@ -32,6 +32,10 @@ class DockerClient:
 
     # "none" is enforced through the derived allow_internet flag.
     network_modes = frozenset({"public", "none"})
+    # containers.run kwargs that would override the policy.
+    network_option_keys = frozenset(
+        {"network_mode", "network", "network_disabled", "networking_config"}
+    )
 
     def __init__(self) -> None:
         try:
