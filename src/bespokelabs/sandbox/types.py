@@ -19,6 +19,10 @@ class SandboxConfig:
       - image: Modal, Daytona, RunPod (OCI image), Docker
                (e.g. "python:3.12-slim"),
                Tensorlake (project-scoped image name, e.g. "tensorlake/ubuntu-minimal")
+      - dockerfile / context_dir: Docker (local build), Daytona (declarative
+        build), Modal (``Image.from_dockerfile``).  Local paths; the context
+        defaults to the Dockerfile's directory.  Mutually exclusive with
+        ``image`` and ``snapshot_id``.
       - template: E2B and RunPod
       - app_name: Modal only
       - allow_internet: Tensorlake, Daytona, Docker
@@ -55,6 +59,9 @@ class SandboxConfig:
     snapshot_id: str | None = None
     workdir: str | None = None
     backend_options: dict = field(default_factory=dict)
+    # New fields go last so positional construction keeps working.
+    dockerfile: str | None = None
+    context_dir: str | None = None
 
 
 @dataclass
