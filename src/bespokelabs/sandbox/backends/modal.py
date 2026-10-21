@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import inspect
 import pathlib
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     FeatureNotSupportedError,
+    SandboxConfigurationError,
     SandboxCreationError,
     SandboxExecutionError,
 )
 from bespokelabs.sandbox.types import (
+    ExposedPort,
     FileInfo,
     NetworkPolicy,
     SandboxConfig,
@@ -22,6 +25,7 @@ from bespokelabs.sandbox.types import (
 class ModalClient:
     """Factory for Modal sandboxes."""
 
+    supports_dockerfile = True
     network_modes = frozenset({"public", "none", "allowlist"})
     # cidr_allowlist is the deprecated name of outbound_cidr_allowlist.
     network_option_keys = frozenset(
@@ -61,6 +65,9 @@ class ModalClient:
             if config.image:
                 create_kwargs["image"] = modal.Image.from_registry(config.image)
 
+            if config.dockerfile:
+                create_kwargs["image"] = _image_from_dockerfile(modal, config)
+
             if config.snapshot_id:
                 create_kwargs["image"] = modal.Image.from_id(config.snapshot_id)
 
@@ -75,6 +82,8 @@ class ModalClient:
                 create_kwargs.update(config.backend_options)
 
             sandbox = modal.Sandbox.create(**create_kwargs)
+        except FeatureNotSupportedError:
+            raise
         except Exception as exc:
             raise SandboxCreationError(
                 f"Failed to create Modal sandbox: {exc}"
@@ -90,6 +99,30 @@ class ModalClient:
                 f"Cannot resume Modal sandbox '{data.get('sandbox_id')}': {exc}"
             ) from exc
         return ModalSession(sandbox=sandbox)
+
+
+def _image_from_dockerfile(modal: object, config: SandboxConfig) -> object:
+    """Build ``Image.from_dockerfile`` with the build context.
+
+    ``context_dir`` arrived in modal 0.74; older SDKs only take a
+    ``context_mount``, so fail clearly instead of with a TypeError.
+    """
+    from_dockerfile = modal.Image.from_dockerfile  # type: ignore[attr-defined]
+    try:
+        params = inspect.signature(from_dockerfile).parameters
+    except (TypeError, ValueError):
+        params = None
+    if params is not None and not (
+        "context_dir" in params
+        or any(p.kind is p.VAR_KEYWORD for p in params.values())
+    ):
+        raise FeatureNotSupportedError(
+            "Building from a Dockerfile on Modal needs modal>=0.74 "
+            "(Image.from_dockerfile(context_dir=...)); upgrade modal",
+            backend="modal",
+            op="create",
+        )
+    return from_dockerfile(config.dockerfile, context_dir=config.context_dir)
 
 
 def _network_kwargs(policy: NetworkPolicy | None) -> dict:
@@ -215,6 +248,24 @@ class ModalSession:
                 f"Modal download_file failed: {exc}"
             ) from exc
 
+    def expose_port(self, port: int) -> ExposedPort:
+        """Return the tunnel URL for a port opened at creation."""
+        try:
+            tunnels = self._sandbox.tunnels()
+        except Exception as exc:
+            raise SandboxExecutionError(
+                f"Modal tunnel lookup failed: {exc}"
+            ) from exc
+        url = _tunnel_url(tunnels, port)
+        if url is None:
+            raise SandboxConfigurationError(
+                f"Modal opens ports only at creation; pass "
+                f"backend_options={{'encrypted_ports': [{port}]}}",
+                backend="modal",
+                op="expose_port",
+            )
+        return ExposedPort(port=port, url=url)
+
     def set_network(self, policy: NetworkPolicy) -> None:
         """Replace the outbound policy via Modal's experimental API."""
         setter = getattr(
@@ -269,3 +320,20 @@ class ModalSession:
         except Exception:
             pass
         self._sandbox = None
+
+
+def _tunnel_url(tunnels: object, port: int) -> str | None:
+    """Find *port*'s URL in a ``Sandbox.tunnels()`` result.
+
+    modal>=0.64.153 returns ``{port: Tunnel}``; earlier releases return a
+    list of ``TunnelData`` protos, whose URL we build the way ``Tunnel.url``
+    does.
+    """
+    if isinstance(tunnels, dict):
+        tunnel = tunnels.get(port)
+        return None if tunnel is None else tunnel.url
+    for data in tunnels:  # type: ignore[attr-defined]
+        if data.container_port == port:
+            url = f"https://{data.host}"
+            return url if data.port == 443 else f"{url}:{data.port}"
+    return None

@@ -26,6 +26,7 @@ from bespokelabs.sandbox.exceptions import (
     SandboxTimeoutError,
 )
 from bespokelabs.sandbox.types import (
+    ExposedPort,
     FileInfo,
     NetworkPolicy,
     SandboxConfig,
@@ -135,6 +136,7 @@ class DaytonaClient:
     created through this client.
     """
 
+    supports_dockerfile = True
     network_modes = frozenset({"public", "none", "allowlist"})
     network_option_keys = frozenset(
         {"network_block_all", "network_allow_list", "domain_allow_list"}
@@ -203,6 +205,7 @@ class DaytonaClient:
         # already built the sandbox, this token is how we find the orphan.
         create_token = uuid.uuid4().hex
         create_kwargs = _create_kwargs(config)
+        _check_dockerfile_context(config)
         # Validate here so a bad policy is a config error, not a create error.
         _network_params(config.network)
 
@@ -314,6 +317,34 @@ def _create_kwargs(config: SandboxConfig) -> dict:
     return {"timeout": timeout}
 
 
+def _check_dockerfile_context(config: SandboxConfig) -> None:
+    """Reject a build context Daytona's declarative builder cannot use.
+
+    ``Image.from_dockerfile`` resolves COPY sources against the Dockerfile's
+    own directory and takes no separate context argument.
+    """
+    if not config.dockerfile or not config.context_dir:
+        return
+    dockerfile_dir = os.path.dirname(os.path.realpath(config.dockerfile))
+    if os.path.realpath(config.context_dir) != dockerfile_dir:
+        raise SandboxConfigurationError(
+            "Daytona builds use the Dockerfile's directory as the build "
+            "context; move the Dockerfile to the context root or omit "
+            "context_dir.",
+            backend="daytona",
+            op="create",
+        )
+
+
+def _image_source(config: SandboxConfig) -> object | None:
+    """Return a registry image name, a declarative Image, or ``None``."""
+    if config.dockerfile:
+        from daytona import Image  # type: ignore[import-untyped]
+
+        return Image.from_dockerfile(config.dockerfile)
+    return config.image
+
+
 def _network_params(
     policy: NetworkPolicy | None, *, update: bool = False
 ) -> dict:
@@ -413,7 +444,8 @@ def _build_params(config: SandboxConfig, *, create_token: str) -> object:
         _CREATE_TOKEN_LABEL: create_token,
     }
 
-    if config.image:
+    image = _image_source(config)
+    if image is not None:
         # Build resources if non-default cpu or memory is specified
         resources_kwargs: dict = {}
         if config.cpu != 1.0:
@@ -427,7 +459,7 @@ def _build_params(config: SandboxConfig, *, create_token: str) -> object:
 
         resources = Resources(**resources_kwargs) if resources_kwargs else None
         return CreateSandboxFromImageParams(
-            image=config.image, resources=resources, **common
+            image=image, resources=resources, **common
         )
 
     if config.snapshot_id:
@@ -544,6 +576,20 @@ class DaytonaSession:
             raise SandboxExecutionError(
                 f"Daytona download_file failed: {exc}"
             ) from exc
+
+    def expose_port(self, port: int) -> ExposedPort:
+        """Return the port's preview link; the sandbox stays private.
+
+        A private sandbox answers 401 unless the request carries the preview
+        token, so the token goes in the returned headers.
+        """
+        try:
+            link = self._sandbox.get_preview_link(port)
+        except Exception as exc:
+            raise _classify_daytona_error(exc, op="expose_port") from exc
+        token = getattr(link, "token", None)
+        headers = {"X-Daytona-Preview-Token": token} if token else {}
+        return ExposedPort(port=port, url=link.url, headers=headers)
 
     def set_network(self, policy: NetworkPolicy) -> None:
         params = _network_params(policy, update=True)

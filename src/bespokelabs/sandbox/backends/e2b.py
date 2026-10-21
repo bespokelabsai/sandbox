@@ -13,6 +13,7 @@ from bespokelabs.sandbox.exceptions import (
     SandboxExecutionError,
 )
 from bespokelabs.sandbox.types import (
+    ExposedPort,
     FileInfo,
     SandboxConfig,
     SandboxResult,
@@ -186,6 +187,24 @@ class E2BSession:
             raise SandboxExecutionError(
                 f"E2B download_file failed: {exc}"
             ) from exc
+
+    def expose_port(self, port: int) -> ExposedPort:
+        """Return the sandbox host for *port*.
+
+        Sandboxes created with restricted public traffic hand out a traffic
+        access token, which goes in the returned headers.
+        """
+        try:
+            host = self._sandbox.get_host(port)
+        except Exception as exc:
+            raise SandboxExecutionError(f"E2B get_host failed: {exc}") from exc
+        token = getattr(self._sandbox, "traffic_access_token", None)
+        headers = (
+            {"e2b-traffic-access-token": token}
+            if isinstance(token, str) and token
+            else {}
+        )
+        return ExposedPort(port=port, url=f"https://{host}", headers=headers)
 
     def snapshot(self) -> SnapshotInfo:
         raise FeatureNotSupportedError(

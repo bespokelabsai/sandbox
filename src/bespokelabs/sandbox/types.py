@@ -71,6 +71,10 @@ class SandboxConfig:
       - image: Modal, Daytona, RunPod (OCI image), Docker
                (e.g. "python:3.12-slim"),
                Tensorlake (project-scoped image name, e.g. "tensorlake/ubuntu-minimal")
+      - dockerfile / context_dir: Docker (local build), Daytona (declarative
+        build), Modal (``Image.from_dockerfile``).  Local paths; the context
+        defaults to the Dockerfile's directory.  Mutually exclusive with
+        ``image`` and ``snapshot_id``.
       - template: E2B and RunPod
       - app_name: Modal only
       - allow_internet: legacy best-effort flag, mapped by Docker and
@@ -113,6 +117,8 @@ class SandboxConfig:
     workdir: str | None = None
     backend_options: dict = field(default_factory=dict)
     # New fields go last so positional construction keeps working.
+    dockerfile: str | None = None
+    context_dir: str | None = None
     network: NetworkPolicy | None = None
 
 
@@ -210,6 +216,20 @@ class SnapshotInfo:
     snapshot_id: str
     backend: str
     created_at: str | None = None
+
+
+@dataclass
+class ExposedPort:
+    """A URL that reaches a port inside the sandbox from outside it.
+
+    Send ``headers`` with every request. Where the provider authenticates the
+    URL they carry its access token, so treat them as a secret; they are left
+    out of ``repr``.
+    """
+
+    port: int
+    url: str
+    headers: dict[str, str] = field(default_factory=dict, repr=False)
 
 
 @dataclass

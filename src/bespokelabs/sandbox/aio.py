@@ -33,6 +33,7 @@ from bespokelabs.sandbox.protocols import SandboxBackendClient
 from bespokelabs.sandbox.sandbox import Sandbox
 from bespokelabs.sandbox.types import (
     AgentRunResult,
+    ExposedPort,
     FileInfo,
     NetworkPolicy,
     SandboxResult,
@@ -75,6 +76,8 @@ class AsyncSandbox:
         gpu: str | None = None,
         timeout_secs: int | None = None,
         image: str | None = None,
+        dockerfile: str | Path | None = None,
+        context_dir: str | Path | None = None,
         env_vars: dict[str, str] | None = None,
         allow_internet: bool | None = None,
         network: NetworkPolicy | None = None,
@@ -97,6 +100,8 @@ class AsyncSandbox:
             gpu=gpu,
             timeout_secs=timeout_secs,
             image=image,
+            dockerfile=dockerfile,
+            context_dir=context_dir,
             env_vars=env_vars,
             allow_internet=allow_internet,
             network=network,
@@ -243,6 +248,10 @@ class AsyncSandbox:
 
     # -- Lifecycle ---------------------------------------------------------
 
+    async def expose_port(self, port: int) -> ExposedPort:
+        """Async version of :meth:`Sandbox.expose_port`."""
+        return await asyncio.to_thread(self._sandbox.expose_port, port)
+
     async def set_network(self, policy: NetworkPolicy) -> None:
         """Async version of :meth:`Sandbox.set_network`."""
         await asyncio.to_thread(self._sandbox.set_network, policy)
@@ -327,6 +336,8 @@ class AsyncSandboxClient:
         gpu: str | None = None,
         timeout_secs: int | None = None,
         image: str | None = None,
+        dockerfile: str | Path | None = None,
+        context_dir: str | Path | None = None,
         env_vars: dict[str, str] | None = None,
         allow_internet: bool | None = None,
         network: NetworkPolicy | None = None,
@@ -355,6 +366,8 @@ class AsyncSandboxClient:
             gpu=gpu,
             timeout_secs=timeout_secs,
             image=image,
+            dockerfile=dockerfile,
+            context_dir=context_dir,
             env_vars=env_vars,
             allow_internet=allow_internet,
             network=network,

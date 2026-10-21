@@ -464,6 +464,8 @@ sb = Sandbox(
     gpu=None,             # GPU type/count (Modal, RunPod)
     timeout_secs=None,    # Omitted: preset default, otherwise 600 seconds
     image=None,           # OCI image, or Tensorlake project image name
+    dockerfile=None,      # Local Dockerfile to build instead of image (Docker, Daytona, Modal)
+    context_dir=None,     # Build context for dockerfile (default: its directory)
     template=None,        # Template ID (E2B, RunPod)
     env_vars=None,        # dict of environment variables
     allow_internet=True,  # Legacy best-effort flag; prefer network= (see Network policy)
@@ -531,6 +533,28 @@ Constructing a `Sandbox` creates the underlying sandbox immediately. To launch
 many sandboxes on one backend, or to use `async`/`await`, see
 [Reusing a client across many sandboxes](#reusing-a-client-across-many-sandboxes)
 and [Async](#async).
+
+### Building from a Dockerfile
+
+Pass a local Dockerfile instead of an image name. The build context defaults
+to the Dockerfile's directory:
+
+```python
+with Sandbox("daytona", dockerfile="env/Dockerfile") as sb:
+    sb.execute_command("cat /etc/os-release")
+
+with Sandbox("docker", dockerfile="env/Dockerfile", context_dir=".") as sb:
+    ...
+```
+
+Docker builds the image with the local daemon and leaves it untagged. Daytona
+builds it declaratively (`Image.from_dockerfile`) as part of the create call,
+so raise `backend_options={"create_timeout": ...}` for slow builds; it uses the
+Dockerfile's directory as the context and rejects any other `context_dir`.
+Modal uses `Image.from_dockerfile`. `dockerfile` cannot be combined with
+`image` or `snapshot_id`, and with a preset it replaces the preset image, so
+the preset's setup commands run. Other backends raise
+`FeatureNotSupportedError`.
 
 ### Executing Code
 
@@ -627,6 +651,34 @@ and empty directories. `method="auto"` uses tar when available, otherwise
 require parent directories to exist, so create them before writing nested paths.
 On macOS, `COPYFILE_DISABLE=1` avoids AppleDouble metadata files in local tar
 downloads.
+
+### Exposing ports
+
+`expose_port(port)` returns an `ExposedPort` with a `url` that reaches a server
+listening on that port inside the sandbox, plus any `headers` the request
+needs:
+
+```python
+import httpx
+
+sb.execute_command("nohup python3 -m http.server 8080 >/dev/null 2>&1 &")
+exposed = sb.expose_port(8080)
+httpx.get(exposed.url, headers=exposed.headers)
+```
+
+The URLs are authenticated where the provider supports it. Daytona returns the
+sandbox's preview link and keeps the sandbox private, so the link answers 401
+without the `X-Daytona-Preview-Token` header in `headers`. E2B returns the
+`get_host` address, and adds its traffic access token to `headers` when the
+sandbox was created with restricted public traffic. Treat `headers` as a
+secret; it is left out of `repr`.
+
+Docker and Modal can only open ports at creation, and their URLs carry no
+authentication. On Docker, publish the port with
+`backend_options={"ports": {"8080/tcp": ("127.0.0.1", None)}}`; the URL points
+at the host side of that mapping. On Modal, pass
+`backend_options={"encrypted_ports": [8080]}`; the URL is the tunnel address.
+Other backends raise `FeatureNotSupportedError`.
 
 ### Declarative workspaces
 
@@ -1269,6 +1321,8 @@ accepts `-c`; use shell commands for other language runtimes.
 | `upload_file` | `shutil.copy` | `shutil.copy` | `put_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
 | `download_file` | `shutil.copy` | `shutil.copy` | `get_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
 | `snapshot` | No | No | Yes | No | No | Yes | Yes | No | No |
+| `dockerfile=` | Rejected | Rejected | Local build | Rejected | Declarative build | Rejected | `Image.from_dockerfile` | Rejected | Rejected |
+| `expose_port` | No | No | Published port | No | Preview link + token | No | Tunnel | No | `get_host` |
 | Resource limits | No | No | cpu, memory | cpu (Ray) | cpu, memory, disk | cpu, memory | cpu, memory, gpu | cpu, memory, disk, gpu | Tier-based |
 | `allow_internet=False` (legacy, prefer `network=`) | Ignored | Ignored | Yes | Ignored | Ignored | Yes | Ignored | Rejected | Ignored |
 | `network=` modes | public | public | public, none | public | all | public, none | all | public | public |
