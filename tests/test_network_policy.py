@@ -24,6 +24,13 @@ try:
 except ImportError:  # pragma: no cover - exercised only without the extra
     _HAS_DAYTONA = False
 
+try:
+    import modal  # noqa: F401
+
+    _HAS_MODAL = True
+except ImportError:  # pragma: no cover - exercised only without the extra
+    _HAS_MODAL = False
+
 if _HAS_DAYTONA:
     from bespokelabs.sandbox.backends.daytona import (
         DaytonaSession,
@@ -175,6 +182,7 @@ class ModalNetworkTests(unittest.TestCase):
         with self.assertRaises(FeatureNotSupportedError):
             session.set_network(NONE)
 
+    @unittest.skipUnless(_HAS_MODAL, "Modal SDK not installed")
     def test_set_network_blocks_until_modal_applies_it(self) -> None:
         # Drive the real synchronicity-wrapped modal.Sandbox, faking only the
         # RPC, so a dropped coroutine would leave `sent` empty.
