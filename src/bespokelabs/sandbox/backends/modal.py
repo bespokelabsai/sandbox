@@ -76,7 +76,10 @@ class ModalClient:
                     modal.Secret.from_dict(config.env_vars)
                 ]
 
-            create_kwargs.update(_network_kwargs(config.network))
+            network_kwargs = _network_kwargs(config.network)
+            if network_kwargs:
+                _require_create_kwargs(modal, network_kwargs)
+            create_kwargs.update(network_kwargs)
 
             if config.backend_options:
                 create_kwargs.update(config.backend_options)
@@ -123,6 +126,32 @@ def _image_from_dockerfile(modal: object, config: SandboxConfig) -> object:
             op="create",
         )
     return from_dockerfile(config.dockerfile, context_dir=config.context_dir)
+
+
+def _require_create_kwargs(modal: object, kwargs: dict) -> None:
+    """Refuse a network policy this Modal SDK's ``Sandbox.create`` can't take.
+
+    The outbound allowlist arguments are newer than the ``modal>=0.60``
+    floor; an older SDK would reject them with a TypeError, so fail as
+    unsupported instead.
+    """
+    try:
+        params = inspect.signature(
+            modal.Sandbox.create  # type: ignore[attr-defined]
+        ).parameters
+    except (TypeError, ValueError):
+        return
+    if any(p.kind is p.VAR_KEYWORD for p in params.values()):
+        return
+    missing = sorted(k for k in kwargs if k not in params)
+    if missing:
+        raise FeatureNotSupportedError(
+            "This Modal SDK's Sandbox.create does not accept "
+            f"{', '.join(missing)}, so it cannot enforce this network "
+            "policy; upgrade modal",
+            backend="modal",
+            op="create",
+        )
 
 
 def _network_kwargs(policy: NetworkPolicy | None) -> dict:

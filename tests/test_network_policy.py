@@ -167,6 +167,37 @@ class ModalNetworkTests(unittest.TestCase):
         kwargs = self._create_kwargs(NetworkPolicy())
         self.assertNotIn("block_network", kwargs)
 
+    def test_old_sdk_without_allowlist_kwargs_is_unsupported(self) -> None:
+        calls = []
+
+        class OldSandbox:
+
+            @staticmethod
+            def create(
+                *args,
+                app=None,
+                timeout=None,
+                cpu=None,
+                memory=None,
+                block_network=False,
+                cidr_allowlist=None,
+            ):
+                calls.append(block_network)
+                return mock.MagicMock()
+
+        client = object.__new__(ModalClient)
+        client._modal = mock.MagicMock()
+        client._modal.Sandbox = OldSandbox
+        for policy in (CIDRS, DOMAINS):
+            with self.subTest(policy=policy):
+                with self.assertRaises(FeatureNotSupportedError):
+                    client.create(
+                        SandboxConfig(backend="modal", network=policy)
+                    )
+        self.assertEqual(calls, [])
+        client.create(SandboxConfig(backend="modal", network=NONE))
+        self.assertEqual(calls, [True])
+
     def test_set_network(self) -> None:
         sandbox = mock.MagicMock()
         session = ModalSession(sandbox=sandbox)
