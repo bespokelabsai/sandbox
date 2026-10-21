@@ -52,8 +52,6 @@ class SandboxConfig:
     timeout_secs: int = 600
     timeout_secs_explicit: bool = False
     image: str | None = None
-    dockerfile: str | None = None
-    context_dir: str | None = None
     env_vars: dict[str, str] = field(default_factory=dict)
     allow_internet: bool = True
     app_name: str | None = None
@@ -61,6 +59,9 @@ class SandboxConfig:
     snapshot_id: str | None = None
     workdir: str | None = None
     backend_options: dict = field(default_factory=dict)
+    # New fields go last so positional construction keeps working.
+    dockerfile: str | None = None
+    context_dir: str | None = None
 
 
 @dataclass

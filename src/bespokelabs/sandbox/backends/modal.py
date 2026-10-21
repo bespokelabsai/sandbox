@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
 import pathlib
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
+    FeatureNotSupportedError,
     SandboxCreationError,
     SandboxExecutionError,
 )
@@ -51,9 +53,7 @@ class ModalClient:
                 create_kwargs["image"] = modal.Image.from_registry(config.image)
 
             if config.dockerfile:
-                create_kwargs["image"] = modal.Image.from_dockerfile(
-                    config.dockerfile, context_dir=config.context_dir
-                )
+                create_kwargs["image"] = _image_from_dockerfile(modal, config)
 
             if config.snapshot_id:
                 create_kwargs["image"] = modal.Image.from_id(config.snapshot_id)
@@ -67,6 +67,8 @@ class ModalClient:
                 create_kwargs.update(config.backend_options)
 
             sandbox = modal.Sandbox.create(**create_kwargs)
+        except FeatureNotSupportedError:
+            raise
         except Exception as exc:
             raise SandboxCreationError(
                 f"Failed to create Modal sandbox: {exc}"
@@ -82,6 +84,30 @@ class ModalClient:
                 f"Cannot resume Modal sandbox '{data.get('sandbox_id')}': {exc}"
             ) from exc
         return ModalSession(sandbox=sandbox)
+
+
+def _image_from_dockerfile(modal: object, config: SandboxConfig) -> object:
+    """Build ``Image.from_dockerfile`` with the build context.
+
+    ``context_dir`` arrived in modal 0.74; older SDKs only take a
+    ``context_mount``, so fail clearly instead of with a TypeError.
+    """
+    from_dockerfile = modal.Image.from_dockerfile  # type: ignore[attr-defined]
+    try:
+        params = inspect.signature(from_dockerfile).parameters
+    except (TypeError, ValueError):
+        params = None
+    if params is not None and not (
+        "context_dir" in params
+        or any(p.kind is p.VAR_KEYWORD for p in params.values())
+    ):
+        raise FeatureNotSupportedError(
+            "Building from a Dockerfile on Modal needs modal>=0.74 "
+            "(Image.from_dockerfile(context_dir=...)); upgrade modal",
+            backend="modal",
+            op="create",
+        )
+    return from_dockerfile(config.dockerfile, context_dir=config.context_dir)
 
 
 class ModalSession:

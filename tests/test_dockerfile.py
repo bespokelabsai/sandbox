@@ -11,6 +11,7 @@ from bespokelabs.sandbox import Sandbox
 from bespokelabs.sandbox.backends.docker import DockerClient
 from bespokelabs.sandbox.backends.modal import ModalClient
 from bespokelabs.sandbox.exceptions import (
+    BackendNotInstalledError,
     FeatureNotSupportedError,
     SandboxConfigurationError,
 )
@@ -101,6 +102,18 @@ class SandboxDockerfileArgsTests(_TmpDockerfile):
         with self.assertRaises(FeatureNotSupportedError):
             Sandbox("local", dockerfile=self.dockerfile)
 
+    def test_unsupported_backend_raises_before_its_sdk_loads(self) -> None:
+        backend_cls = mock.Mock(
+            side_effect=BackendNotInstalledError("no SDK"),
+            supports_dockerfile=False,
+        )
+        with mock.patch.dict(
+            "bespokelabs.sandbox.backends.BACKENDS", {"e2b": backend_cls}
+        ):
+            with self.assertRaises(FeatureNotSupportedError):
+                Sandbox("e2b", dockerfile=self.dockerfile)
+        backend_cls.assert_not_called()
+
 
 class DockerDockerfileTests(_TmpDockerfile):
 
@@ -151,6 +164,26 @@ class ModalDockerfileTests(_TmpDockerfile):
         )
         _, kwargs = modal.Sandbox.create.call_args
         self.assertIs(kwargs["image"], modal.Image.from_dockerfile.return_value)
+
+    def test_modal_without_context_dir_raises_clearly(self) -> None:
+        client = object.__new__(ModalClient)
+        client._modal = mock.MagicMock()
+
+        # modal<0.74 signature: a context_mount, no context_dir.
+        def from_dockerfile(path, context_mount=None, force_build=False):
+            raise AssertionError("must not be called")
+
+        client._modal.Image.from_dockerfile = from_dockerfile
+
+        with self.assertRaises(FeatureNotSupportedError):
+            client.create(
+                SandboxConfig(
+                    backend="modal",
+                    dockerfile=str(self.dockerfile),
+                    context_dir=str(self.root),
+                )
+            )
+        client._modal.Sandbox.create.assert_not_called()
 
 
 @unittest.skipUnless(_HAS_DAYTONA, "Daytona SDK not installed")

@@ -183,6 +183,21 @@ class Sandbox:
             backend_options=backend_options or {},
         )
         self._preset = resolved_preset
+        # Capabilities are class attributes, so check them before the
+        # adapter is built: an unsupported build should not depend on
+        # whether that backend's SDK happens to be installed.
+        if dockerfile_path is not None and not getattr(
+            _backend_client
+            if _backend_client is not None
+            else BACKENDS[backend],
+            "supports_dockerfile",
+            False,
+        ):
+            raise FeatureNotSupportedError(
+                f"Backend '{backend}' cannot build from a Dockerfile; use image=",
+                backend=backend,
+                op="create",
+            )
         backend_client = (
             _backend_client
             if _backend_client is not None
@@ -190,15 +205,6 @@ class Sandbox:
         )
         self._destroyed = False
         self._usage = Usage()
-
-        if dockerfile_path is not None and not getattr(
-            backend_client, "supports_dockerfile", False
-        ):
-            raise FeatureNotSupportedError(
-                f"Backend '{backend}' cannot build from a Dockerfile; use image=",
-                backend=backend,
-                op="create",
-            )
 
         try:
             self._session: SandboxBackendSession = backend_client.create(
