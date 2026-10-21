@@ -75,6 +75,27 @@ class ModalExposePortTests(unittest.TestCase):
         self.assertEqual(exposed.url, "https://abc.modal.host")
         self.assertEqual(exposed.headers, {})
 
+    def test_old_sdk_tunnel_list(self) -> None:
+        # modal<0.64.153 returns a list of TunnelData protos.
+        sandbox = mock.MagicMock()
+        sandbox.tunnels.return_value = [
+            SimpleNamespace(container_port=9000, host="x.modal.host", port=443),
+            SimpleNamespace(
+                container_port=8080, host="abc.modal.host", port=443
+            ),
+        ]
+        session = ModalSession(sandbox=sandbox)
+
+        self.assertEqual(
+            session.expose_port(8080).url, "https://abc.modal.host"
+        )
+        sandbox.tunnels.return_value[1].port = 8443
+        self.assertEqual(
+            session.expose_port(8080).url, "https://abc.modal.host:8443"
+        )
+        with self.assertRaises(SandboxConfigurationError):
+            session.expose_port(7000)
+
     def test_port_not_opened_at_creation_raises(self) -> None:
         sandbox = mock.MagicMock()
         sandbox.tunnels.return_value = {}
@@ -91,6 +112,7 @@ class E2BExposePortTests(unittest.TestCase):
 
         exposed = E2BSession(sandbox=sandbox).expose_port(8080)
 
+        sandbox.get_host.assert_called_once_with(8080)
         self.assertEqual(exposed.url, "https://8080-sbx.e2b.app")
         self.assertEqual(exposed.headers, {"e2b-traffic-access-token": "tok"})
 

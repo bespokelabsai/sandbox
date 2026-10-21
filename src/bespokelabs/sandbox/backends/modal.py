@@ -196,15 +196,15 @@ class ModalSession:
             raise SandboxExecutionError(
                 f"Modal tunnel lookup failed: {exc}"
             ) from exc
-        tunnel = tunnels.get(port)
-        if tunnel is None:
+        url = _tunnel_url(tunnels, port)
+        if url is None:
             raise SandboxConfigurationError(
                 f"Modal opens ports only at creation; pass "
                 f"backend_options={{'encrypted_ports': [{port}]}}",
                 backend="modal",
                 op="expose_port",
             )
-        return ExposedPort(port=port, url=tunnel.url)
+        return ExposedPort(port=port, url=url)
 
     def snapshot(self) -> SnapshotInfo:
         try:
@@ -228,3 +228,20 @@ class ModalSession:
         except Exception:
             pass
         self._sandbox = None
+
+
+def _tunnel_url(tunnels: object, port: int) -> str | None:
+    """Find *port*'s URL in a ``Sandbox.tunnels()`` result.
+
+    modal>=0.64.153 returns ``{port: Tunnel}``; earlier releases return a
+    list of ``TunnelData`` protos, whose URL we build the way ``Tunnel.url``
+    does.
+    """
+    if isinstance(tunnels, dict):
+        tunnel = tunnels.get(port)
+        return None if tunnel is None else tunnel.url
+    for data in tunnels:  # type: ignore[attr-defined]
+        if data.container_port == port:
+            url = f"https://{data.host}"
+            return url if data.port == 443 else f"{url}:{data.port}"
+    return None
