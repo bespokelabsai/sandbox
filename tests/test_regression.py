@@ -59,6 +59,17 @@ def _can_use_e2b() -> bool:
         return False
 
 
+def _can_use_boxd() -> bool:
+    if not (os.environ.get("BOXD_API_KEY") or os.environ.get("BOXD_TOKEN")):
+        return False
+    try:
+        from boxd import Boxd  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
 def _can_use_modal() -> bool:
     try:
         import modal  # noqa: F401
@@ -223,6 +234,11 @@ class DaytonaRegressionTests(_RegressionMixin, unittest.TestCase):
 @unittest.skipUnless(_can_use_e2b(), "E2B SDK or E2B_API_KEY not available")
 class E2BRegressionTests(_RegressionMixin, unittest.TestCase):
     backend_name = "e2b"
+
+
+@unittest.skipUnless(_can_use_boxd(), "boxd SDK or BOXD_API_KEY not available")
+class BoxdRegressionTests(_RegressionMixin, unittest.TestCase):
+    backend_name = "boxd"
 
 
 @unittest.skipUnless(_can_use_modal(), "Modal SDK not available")

@@ -2,7 +2,7 @@
 
 Unified Python API for cloud sandbox providers.
 Supports Local, Safehouse, Docker, Ray, Daytona, Tensorlake, Modal, RunPod,
-and E2B as interchangeable backends.
+E2B, and boxd as interchangeable backends.
 
 Usage:
     from bespokelabs.sandbox import Sandbox

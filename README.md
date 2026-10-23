@@ -26,7 +26,7 @@ operations dashboard.
 
 ## Why?
 
-- **Common interface** — Use the same execution and file APIs across nine backends, with provider-specific configuration where needed.
+- **Common interface** — Use the same execution and file APIs across ten backends, with provider-specific configuration where needed.
 - **Easily move between providers** — If one provider has an outage or capacity issue, change one string and keep running.
 - **Cost tracking** — Track Claude Code token usage, estimated sandbox compute cost, and compare backend pricing.
 - **Optional hosted access** — Operate multiple providers behind organization API keys, with lifecycle costs, policies, audit history, and a dashboard.
@@ -73,6 +73,7 @@ pip install 'bespokelabs-sandbox[tensorlake]'
 pip install 'bespokelabs-sandbox[modal]'
 pip install 'bespokelabs-sandbox[e2b]'
 pip install 'bespokelabs-sandbox[ray]'
+pip install 'bespokelabs-sandbox[boxd]'
 pip install 'bespokelabs-sandbox[all]'
 ```
 
@@ -111,6 +112,7 @@ the runtime requirements listed below.
 | [Modal](https://modal.com) | `[modal]` | `MODAL_TOKEN_ID` + `MODAL_TOKEN_SECRET` |
 | [RunPod](https://www.runpod.io) | _(none)_ | `RUNPOD_API_KEY` + registered SSH key |
 | [E2B](https://e2b.dev) | `[e2b]` | `E2B_API_KEY` |
+| [boxd](https://boxd.sh) | `[boxd]` | `BOXD_API_KEY` |
 
 You only need to install the backend you use. The others are lazily imported.
 
@@ -151,7 +153,7 @@ Switch backends by changing one string:
 ```python
 for backend in [
     "local", "safehouse", "docker", "modal", "runpod",
-    "e2b", "daytona", "tensorlake", "ray",
+    "e2b", "daytona", "tensorlake", "ray", "boxd",
 ]:
     options = {"gpu": "NVIDIA L4"} if backend == "runpod" else {}
     with Sandbox(backend, **options) as sb:
@@ -222,7 +224,7 @@ allowed; set an explicit list for your deployment. `HOST` and `PORT` default to
 for the secure dashboard cookie.
 
 Provider configuration is server-owned. The control plane reads the standard
-Daytona, E2B, Modal, Runpod, and Tensorlake credential variables into memory;
+Daytona, E2B, Modal, Runpod, Tensorlake, and boxd credential variables into memory;
 it never returns their names or values through the product API. Scoped
 provider-health responses expose only the backend, configured state, health
 state, check time, and a fixed safe message. A configured provider remains
@@ -456,10 +458,10 @@ Common errors:
 from bespokelabs.sandbox import Sandbox
 
 sb = Sandbox(
-    "local",              # "local" | "safehouse" | "docker" | "ray" | "daytona" | "tensorlake" | "modal" | "runpod" | "e2b"
+    "local",              # "local" | "safehouse" | "docker" | "ray" | "daytona" | "tensorlake" | "modal" | "runpod" | "e2b" | "boxd"
     preset=None,          # Preset name or SandboxPreset object
-    cpu=1.0,              # vCPUs (Tensorlake, Modal, Docker, Daytona, RunPod)
-    memory_mb=1024,       # RAM in MB (Tensorlake, Modal, Docker, Daytona, RunPod)
+    cpu=1.0,              # vCPUs (Tensorlake, Modal, Docker, Daytona, RunPod, boxd)
+    memory_mb=1024,       # RAM in MB (Tensorlake, Modal, Docker, Daytona, RunPod, boxd)
     disk_mb=None,         # Disk in MB (Daytona, RunPod)
     gpu=None,             # GPU type/count (Modal, RunPod)
     timeout_secs=None,    # Omitted: preset default, otherwise 600 seconds
@@ -471,7 +473,7 @@ sb = Sandbox(
     allow_internet=True,  # Legacy best-effort flag; prefer network= (see Network policy)
     network=None,         # NetworkPolicy: enforced egress policy, or an error
     app_name=None,        # App name (Modal)
-    snapshot_id=None,     # Restore from snapshot (Tensorlake, Modal, Daytona)
+    snapshot_id=None,     # Restore from snapshot (Tensorlake, Modal, Daytona, boxd)
     workdir=None,         # Sandbox root or command working directory
     backend_options=None, # dict merged into the backend's native create call
     files=None,           # {path: bytes|str} written into the sandbox on create
@@ -516,6 +518,28 @@ templates must run an SSH daemon on port 22. Add the matching public key to the
 RunPod account before creating a sandbox. `ssh_private_key_path` is optional
 when the key is already discoverable by OpenSSH.
 
+boxd rounds `cpu` and `memory_mb` up to the smallest machine size that holds
+both: 1 vCPU/4 GiB, 2/8, 4/16, or 8/32. Machines boot boxd's Ubuntu 24.04 image
+with Python, Node, Docker, git, and the Claude Code, Codex, and OpenCode CLIs,
+so `image=`, `dockerfile=`, and `gpu=` are rejected; restore a boxd snapshot
+with `snapshot_id`, or run an image inside the machine with Docker. Every
+machine is created isolated, without the in-VM boxd CLI, account integrations,
+or agent logins:
+
+```python
+with Sandbox("boxd", cpu=2, memory_mb=8192) as sb:
+    result = sb.execute_command("docker run --rm hello-world")
+    print(result.stdout)
+```
+
+Commands run as the `boxd` user, who has passwordless sudo, in `/home/boxd`.
+`/workspace` is created for that user, and the file helpers fall back to sudo
+for root-owned paths. `env_vars` are exported into each command rather than
+written to the machine, so they stay out of its disk and its snapshots. boxd
+closes a command that prints nothing for 30 minutes, so the adapter writes a
+NUL byte to stderr every five minutes while one runs and strips it from the
+result.
+
 `timeout_secs` is a command timeout on Local, Safehouse, Docker, Ray, and
 RunPod. E2B and Modal pass it as the provider sandbox timeout; Tensorlake passes
 it to `create_and_connect`. Daytona maps an explicit value to a wall-clock
@@ -528,6 +552,10 @@ creation, so image pull and boot count against it. The mapping happens only
 when you pass `timeout_secs` yourself. Omit it — including when a preset
 supplies its own recommended value — and the Daytona sandbox gets no TTL at
 all, leaving it bounded only by Daytona's default 15-minute idle auto-stop.
+boxd treats an explicit value the same way, as a `delete_after` deadline that
+the platform enforces even while the machine sleeps. Without one, a boxd
+machine lives until `destroy()`, and hibernates after 4 hours without network
+traffic.
 
 Constructing a `Sandbox` creates the underlying sandbox immediately. To launch
 many sandboxes on one backend, or to use `async`/`await`, see
@@ -1100,6 +1128,8 @@ survives `destroy()`, while an automatically created temporary directory is
 removed. Daytona and Tensorlake use `workdir` for shell commands only; their
 code and file APIs keep provider path semantics. RunPod defaults command
 execution to `/workspace`, while its file helpers use SSH path semantics.
+boxd runs commands in `/home/boxd` unless `workdir` is set, and resolves
+relative file paths there.
 Docker, Modal, E2B, and Ray do not map the top-level `workdir` option.
 
 ### Network policy
@@ -1129,6 +1159,12 @@ accepted everywhere.
   `outbound_domain_allowlist`). `set_network()` uses Modal's experimental
   outbound policy API and supports `public` and `allowlist`, not `none`.
 - Docker and Tensorlake: `public` and `none` at creation.
+- boxd: every mode, at creation and through `set_network()`, as an egress
+  allow-list. HTTP and HTTPS are admitted by hostname and other traffic by
+  address, so a CIDR does not open HTTPS to a bare IP in it. `none` admits
+  nothing, although DNS lookups still resolve; a blocked HTTP request gets a
+  `403`. The policy is enforced before `Sandbox(...)` or `set_network()`
+  returns.
 
 `allow_internet` keeps its old best-effort behavior (see the matrix) for
 compatibility. Passing both `network` and `allow_internet` is an error; with
@@ -1140,8 +1176,8 @@ compatibility. Passing both `network` and `allow_internet` is an error; with
 native creation call, so you can reach provider features the unified API
 doesn't model — without waiting for a new keyword. It is forwarded to Docker
 `containers.run`, Modal `Sandbox.create`, E2B `Sandbox.create`, Tensorlake
-`create_and_connect`, Daytona's create params, and the RunPod REST creation
-payload; ignored by local, safehouse, and ray.
+`create_and_connect`, Daytona's create params, the RunPod REST creation
+payload, and boxd `machines.create`; ignored by local, safehouse, and ray.
 
 ```python
 # e.g. set the container hostname (a Docker-only knob)
@@ -1159,6 +1195,12 @@ to the REST API: `create_timeout_secs`, `api_timeout_secs`,
 `poll_interval_secs`, `ssh_private_key_path`, `ssh_user`,
 `ssh_connect_timeout_secs`, `ssh_strict_host_key_checking`, and
 `ssh_known_hosts_file`. Other keys use RunPod's native camelCase field names.
+
+On boxd, `name`, `name_prefix`, `ready_timeout_secs`, `snapshot_timeout_secs`,
+and `auto_hibernate_timeout` are consumed by the adapter. Other keys are
+`machines.create` arguments such as `org`, `labels`, `auto_destroy_timeout`,
+or `idle_ignore_outbound`; an unknown key is rejected before anything is
+created. `isolated` cannot be turned off.
 
 ### Session state (resume)
 
@@ -1187,8 +1229,9 @@ Resume skips preset setup and workspace materialization. Provider credentials
 must be available in the resuming process; host-directory sessions require the
 same accessible directory. Session state is not a complete configuration or
 usage checkpoint: wrapper configuration and cumulative agent usage reset on
-resume. Local/Safehouse state includes the supplied environment overlay, which
-may contain secrets. Both attached handles refer to the same resource, so
+resume. Local, Safehouse, and boxd state include the supplied environment
+overlay, which may contain secrets. Resuming a boxd machine that is in standby,
+hibernated, or stopped wakes it first. Both attached handles refer to the same resource, so
 destroying either affects the other.
 
 | Backend | Resume by | session_state payload |
@@ -1199,6 +1242,7 @@ destroying either affects the other.
 | Tensorlake | sandbox id (`client.connect`) | `sandbox_id` |
 | Daytona | sandbox id (`client.get`) | `sandbox_id`, `workdir` (when set) |
 | RunPod | Pod id (`GET /pods/{id}`) | `pod_id`, workdir and SSH transport settings |
+| boxd | machine id (`machines.get`) | `machine_id`, workdir, env vars, org |
 | Local, Safehouse | host workdir | `workdir`, env overlay |
 | Ray | — (not supported) | raises `FeatureNotSupportedError` |
 
@@ -1217,10 +1261,13 @@ sb2 = Sandbox("tensorlake", snapshot_id=snap.snapshot_id)
 | Docker | Yes (`container.commit()`) |
 | Tensorlake | Yes (filesystem + memory) |
 | Modal | Yes (filesystem) |
+| boxd | Yes (memory and disk, running processes included) |
 | Daytona, E2B, Local, Ray, RunPod, Safehouse | No |
 
 Restore a Docker snapshot using `image=snap.snapshot_id`; Docker does not map
-`snapshot_id`. Modal and Tensorlake accept `snapshot_id`. Daytona can create
+`snapshot_id`. Modal, Tensorlake, and boxd accept `snapshot_id`; boxd snapshots
+outlive the sandbox, so remove them with `boxd snapshot remove` when you are
+done. Daytona can create
 from an existing provider snapshot via `snapshot_id`, although this adapter
 cannot create snapshots with `snapshot()`.
 
@@ -1311,25 +1358,25 @@ This table describes the adapters in this repository, not every feature offered
 by each provider's native SDK. “Interpreter” means an installed binary that
 accepts `-c`; use shell commands for other language runtimes.
 
-| Feature | Local | Safehouse | Docker | Ray | Daytona | Tensorlake | Modal | RunPod | E2B |
-|---|---|---|---|---|---|---|---|---|---|
-| `execute_code` | Interpreter | Interpreter | Interpreter | Interpreter | Python | Interpreter | Interpreter | Interpreter | Python |
-| `execute_command` | Shell | Shell | Shell | Shell | Shell | Shell | Shell | SSH | Shell |
-| `list_files` | Native | Native | `find` / `ls` | Native | Native SDK | via `ls` | Native SDK | via SSH | Native SDK |
-| `read_file` | Native | Native | `get_archive` | Native | Native SDK | via `cat` | Native SDK | via SSH | Native SDK |
-| `write_file` | Native | Native | `put_archive` | Native | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
-| `upload_file` | `shutil.copy` | `shutil.copy` | `put_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
-| `download_file` | `shutil.copy` | `shutil.copy` | `get_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
-| `snapshot` | No | No | Yes | No | No | Yes | Yes | No | No |
-| `dockerfile=` | Rejected | Rejected | Local build | Rejected | Declarative build | Rejected | `Image.from_dockerfile` | Rejected | Rejected |
-| `expose_port` | No | No | Published port | No | Preview link + token | No | Tunnel | No | `get_host` |
-| Resource limits | No | No | cpu, memory | cpu (Ray) | cpu, memory, disk | cpu, memory | cpu, memory, gpu | cpu, memory, disk, gpu | Tier-based |
-| `allow_internet=False` (legacy, prefer `network=`) | Ignored | Ignored | Yes | Ignored | Ignored | Yes | Ignored | Rejected | Ignored |
-| `network=` modes | public | public | public, none | public | all | public, none | all | public | public |
-| `set_network()` | No | No | No | No | Yes | No | public, allowlist | No | No |
-| Isolation | Process-level | macOS `sandbox-exec` | Container | Process | Full VM | Container | Container | Container | Full VM |
-| `gpu=` reservation | No | No | No | No | No | No | Yes | Yes | No |
-| Needs install | Nothing | `safehouse` CLI | Docker daemon | `ray` | API key | `tl login` | API key | API key + OpenSSH | API key |
+| Feature | Local | Safehouse | Docker | Ray | Daytona | Tensorlake | Modal | RunPod | E2B | boxd |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `execute_code` | Interpreter | Interpreter | Interpreter | Interpreter | Python | Interpreter | Interpreter | Interpreter | Python | Interpreter |
+| `execute_command` | Shell | Shell | Shell | Shell | Shell | Shell | Shell | SSH | Shell | Shell |
+| `list_files` | Native | Native | `find` / `ls` | Native | Native SDK | via `ls` | Native SDK | via SSH | Native SDK | Native SDK |
+| `read_file` | Native | Native | `get_archive` | Native | Native SDK | via `cat` | Native SDK | via SSH | Native SDK | Native SDK |
+| `write_file` | Native | Native | `put_archive` | Native | Native SDK | via base64 | Native SDK | via SSH | Native SDK | Native SDK |
+| `upload_file` | `shutil.copy` | `shutil.copy` | `put_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK | Native SDK |
+| `download_file` | `shutil.copy` | `shutil.copy` | `get_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK | Native SDK |
+| `snapshot` | No | No | Yes | No | No | Yes | Yes | No | No | Yes |
+| `dockerfile=` | Rejected | Rejected | Local build | Rejected | Declarative build | Rejected | `Image.from_dockerfile` | Rejected | Rejected | Rejected |
+| `expose_port` | No | No | Published port | No | Preview link + token | No | Tunnel | No | `get_host` | Public HTTPS proxy |
+| Resource limits | No | No | cpu, memory | cpu (Ray) | cpu, memory, disk | cpu, memory | cpu, memory, gpu | cpu, memory, disk, gpu | Tier-based | cpu, memory (size class) |
+| `allow_internet=False` (legacy, prefer `network=`) | Ignored | Ignored | Yes | Ignored | Ignored | Yes | Ignored | Rejected | Ignored | Yes |
+| `network=` modes | public | public | public, none | public | all | public, none | all | public | public | all |
+| `set_network()` | No | No | No | No | Yes | No | public, allowlist | No | No | Yes |
+| Isolation | Process-level | macOS `sandbox-exec` | Container | Process | Full VM | Container | Container | Container | Full VM | Full VM |
+| `gpu=` reservation | No | No | No | No | No | No | Yes | Yes | No | No |
+| Needs install | Nothing | `safehouse` CLI | Docker daemon | `ray` | API key | `tl login` | API key | API key + OpenSSH | API key | API key |
 
 Daytona applies CPU/RAM/disk overrides when creating from `image`; the snapshot
 creation path uses the snapshot's resources. RunPod CPU/RAM values are minimums
@@ -1337,7 +1384,9 @@ per GPU, not exact allocations. Ray reserves CPU scheduling resources without
 requesting GPU or memory limits. Tensorlake currently does not forward the
 top-level `env_vars` option; inside-agent `AgentSpec.env` can supply per-command
 variables. Its `read_file` converts text stdout to bytes; use `download_file`
-for binary data.
+for binary data. boxd `expose_port` URLs are public and unauthenticated; the
+first one on a machine waits for its TLS certificate, which takes about 20
+seconds.
 
 ## Exceptions
 
@@ -1391,6 +1440,10 @@ export RUNPOD_API_KEY=your_key
 
 # E2B
 export E2B_API_KEY=your_key
+
+# boxd
+export BOXD_API_KEY=your_key
+export BOXD_ORG=your_org      # optional; picks the org for a BOXD_TOKEN session
 ```
 
 ## Envy notifications for agents

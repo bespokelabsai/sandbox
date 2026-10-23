@@ -63,7 +63,8 @@ class SandboxConfig:
     """Normalized configuration passed to every backend adapter.
 
     Not all backends honour every field:
-      - cpu / memory_mb: Daytona, Tensorlake, Modal, Docker, RunPod
+      - cpu / memory_mb: Daytona, Tensorlake, Modal, Docker, RunPod, boxd
+        (rounded up to the smallest boxd machine size)
       - gpu: Modal (e.g. ``"L4"`` or ``"H100:2"``), RunPod (exact GPU
         type ID, optionally followed by a count, e.g.
         ``"NVIDIA H100 80GB HBM3:2"``)
@@ -77,28 +78,31 @@ class SandboxConfig:
         ``image`` and ``snapshot_id``.
       - template: E2B and RunPod
       - app_name: Modal only
-      - allow_internet: legacy best-effort flag, mapped by Docker and
-        Tensorlake, rejected when false on RunPod, ignored elsewhere.  Prefer
-        ``network``.  When ``network`` is set this is derived from it.
-      - network: enforced egress policy (``NetworkPolicy``). Daytona and
-        Modal support every mode, Docker and Tensorlake ``public`` and
-        ``none``; anything a backend cannot enforce raises.
-      - snapshot_id: Tensorlake, Modal
+      - allow_internet: legacy best-effort flag, mapped by Docker,
+        Tensorlake and boxd, rejected when false on RunPod, ignored
+        elsewhere.  Prefer ``network``.  When ``network`` is set this is
+        derived from it.
+      - network: enforced egress policy (``NetworkPolicy``). Daytona,
+        Modal and boxd support every mode, Docker and Tensorlake ``public``
+        and ``none``; anything a backend cannot enforce raises.
+      - snapshot_id: Tensorlake, Modal, boxd
       - env_vars: all backends
       - timeout_secs: all backends (local and ray use subprocess timeout)
       - timeout_secs_explicit: whether ``timeout_secs`` was supplied by the
         caller rather than inherited from a preset or from the default above.
-        Set by ``Sandbox(...)``; only Daytona reads it, because there
-        timeout_secs becomes ttl_minutes -- a hard wall-clock destroy -- and a
-        value nobody asked for must not silently cap a sandbox's lifetime.
+        Set by ``Sandbox(...)``; only Daytona and boxd read it, because
+        there timeout_secs becomes a hard wall-clock destroy (ttl_minutes,
+        delete_after) and a value nobody asked for must not silently cap a
+        sandbox's lifetime.
       - workdir: Local, Safehouse (host directory used as the sandbox root),
-                 Tensorlake, Daytona, RunPod (command working directory;
-                 Tensorlake defaults to /tmp, RunPod to /workspace)
+                 Tensorlake, Daytona, RunPod, boxd (command working directory;
+                 Tensorlake defaults to /tmp, RunPod to /workspace, boxd to
+                 /home/boxd)
       - backend_options: provider-specific escape hatch, merged last into the
         backend's underlying create call (Docker containers.run, Modal
         Sandbox.create, E2B Sandbox.create, Tensorlake create_and_connect,
-        Daytona create params, RunPod REST create payload). Ignored by
-        local/safehouse/ray.
+        Daytona create params, RunPod REST create payload, boxd
+        machines.create). Ignored by local/safehouse/ray.
     """
 
     backend: str

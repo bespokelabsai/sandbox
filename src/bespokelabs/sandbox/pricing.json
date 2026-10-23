@@ -73,6 +73,15 @@
       "free_tier": null,
       "pricing_url": "https://tensorlake.ai",
       "notes": "Estimated. Check Tensorlake docs for current rates."
+    },
+    "boxd": {
+      "vcpu_per_hour_usd": 0.047,
+      "ram_gib_per_hour_usd": 0.014,
+      "storage_gib_per_month_usd": 0.07,
+      "per_execution_usd": 0.0,
+      "free_tier": "EUR 30 of credits when a payment method is added",
+      "pricing_url": "https://boxd.sh/pricing",
+      "notes": "Billed per second: vCPU on the machine size while running, RAM on memory in use, disk on bytes written. Storage is $0.000096/GiB-hour."
     }
   }
 }
