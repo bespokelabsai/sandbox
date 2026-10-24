@@ -196,6 +196,14 @@ class FeatureNotSupportedError(SandboxError):
     code = ErrorCode.FEATURE_NOT_SUPPORTED
 
 
+class UnsupportedOptionWarning(FutureWarning):
+    """A creation option the backend does not apply was set.
+
+    Raised as FeatureNotSupportedError instead when ``strict=True`` is
+    passed, and by default in a future release.
+    """
+
+
 class WorkspaceError(SandboxError):
     """Materializing a workspace manifest or transferring files failed."""
 

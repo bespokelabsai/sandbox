@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from bespokelabs.sandbox import Sandbox
+from bespokelabs.sandbox import BackendCapabilities, Sandbox
 from bespokelabs.sandbox.backends.docker import DockerClient
 from bespokelabs.sandbox.backends.modal import ModalClient
 from bespokelabs.sandbox.exceptions import (
@@ -48,7 +48,6 @@ class SandboxDockerfileArgsTests(_TmpDockerfile):
 
     def _backend(self) -> mock.MagicMock:
         backend = mock.MagicMock()
-        backend.supports_dockerfile = True
         backend.create.return_value.execute_command.return_value = (
             SandboxResult()
         )
@@ -57,7 +56,12 @@ class SandboxDockerfileArgsTests(_TmpDockerfile):
     def _sandbox(self, backend: mock.MagicMock, **kwargs) -> SandboxConfig:
         with mock.patch.dict(
             "bespokelabs.sandbox.backends.BACKENDS",
-            {"docker": mock.Mock(return_value=backend)},
+            {
+                "docker": mock.Mock(
+                    return_value=backend,
+                    capabilities=DockerClient.capabilities,
+                )
+            },
         ):
             with Sandbox("docker", **kwargs):
                 pass
@@ -105,7 +109,7 @@ class SandboxDockerfileArgsTests(_TmpDockerfile):
     def test_unsupported_backend_raises_before_its_sdk_loads(self) -> None:
         backend_cls = mock.Mock(
             side_effect=BackendNotInstalledError("no SDK"),
-            supports_dockerfile=False,
+            capabilities=BackendCapabilities(dockerfile=False),
         )
         with mock.patch.dict(
             "bespokelabs.sandbox.backends.BACKENDS", {"e2b": backend_cls}

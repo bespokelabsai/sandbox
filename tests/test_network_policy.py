@@ -6,7 +6,7 @@ import asyncio
 import unittest
 from unittest import mock
 
-from bespokelabs.sandbox import NetworkPolicy, Sandbox
+from bespokelabs.sandbox import BackendCapabilities, NetworkPolicy, Sandbox
 from bespokelabs.sandbox.backends.daytona import DaytonaClient
 from bespokelabs.sandbox.backends.docker import DockerClient
 from bespokelabs.sandbox.backends.modal import ModalClient, ModalSession
@@ -70,7 +70,11 @@ class SandboxNetworkArgsTests(unittest.TestCase):
         return backend.create.call_args.args[0]
 
     def test_policy_reaches_config_and_derives_allow_internet(self) -> None:
-        backend = mock.MagicMock(network_modes={"public", "none"})
+        backend = mock.MagicMock(
+            capabilities=BackendCapabilities(
+                network_modes=frozenset({"public", "none"})
+            )
+        )
 
         config = self._config(backend, network=NONE)
 
@@ -131,7 +135,11 @@ class SandboxNetworkArgsTests(unittest.TestCase):
         self.assertEqual(config.backend_options, {"network_mode": "host"})
 
         backend = mock.MagicMock(
-            network_modes={"none"}, network_option_keys={"network_mode"}
+            capabilities=BackendCapabilities(
+                options=frozenset({"backend_options"}),
+                network_modes=frozenset({"none"}),
+                network_option_keys=frozenset({"network_mode"}),
+            )
         )
         config = self._config(
             backend, network=NONE, backend_options={"ports": {"80/tcp": None}}

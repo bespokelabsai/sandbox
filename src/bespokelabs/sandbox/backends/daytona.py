@@ -12,6 +12,7 @@ import threading
 import uuid
 from dataclasses import dataclass
 
+from bespokelabs.sandbox.capabilities import BackendCapabilities
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     ErrorOutcome,
@@ -136,10 +137,28 @@ class DaytonaClient:
     created through this client.
     """
 
-    supports_dockerfile = True
-    network_modes = frozenset({"public", "none", "allowlist"})
-    network_option_keys = frozenset(
-        {"network_block_all", "network_allow_list", "domain_allow_list"}
+    capabilities = BackendCapabilities(
+        options=frozenset(
+            {
+                "cpu",
+                "memory_mb",
+                "disk_mb",
+                "timeout_secs",
+                "image",
+                "env_vars",
+                "snapshot_id",
+                "workdir",
+                "backend_options",
+            }
+        ),
+        dockerfile=True,
+        network_modes=frozenset({"public", "none", "allowlist"}),
+        network_option_keys=frozenset(
+            {"network_block_all", "network_allow_list", "domain_allow_list"}
+        ),
+        set_network=frozenset({"public", "none", "allowlist"}),
+        expose_port=True,
+        resume=True,
     )
 
     def __init__(self) -> None:

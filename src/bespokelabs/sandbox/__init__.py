@@ -24,6 +24,10 @@ from bespokelabs.sandbox.agents import (
     OutsideAgentSpec,
 )
 from bespokelabs.sandbox.aio import AsyncSandbox, AsyncSandboxClient
+from bespokelabs.sandbox.capabilities import (
+    BackendCapabilities,
+    backend_capabilities,
+)
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     CommandFailedError,
@@ -38,6 +42,7 @@ from bespokelabs.sandbox.exceptions import (
     SandboxExecutionError,
     SandboxNotFoundError,
     SandboxTimeoutError,
+    UnsupportedOptionWarning,
     WorkspaceError,
 )
 from bespokelabs.sandbox.presets import SandboxPreset
@@ -89,6 +94,8 @@ __all__ = [
     "AgentCapability",
     "AgentInputMode",
     "SandboxPreset",
+    "BackendCapabilities",
+    "backend_capabilities",
     "SandboxConfig",
     "NetworkPolicy",
     "SandboxResult",
@@ -120,6 +127,7 @@ __all__ = [
     "BackendNotInstalledError",
     "FeatureNotSupportedError",
     "WorkspaceError",
+    "UnsupportedOptionWarning",
     "ErrorCode",
     "ErrorOutcome",
     "json_schema",
