@@ -480,12 +480,45 @@ sb = Sandbox(
     git_repo=None,        # repo URL cloned into the sandbox on create
     git_ref=None,         # branch/tag for git_repo
     workspace=None,       # Manifest of files/dirs/repos to materialize on create
+    strict=None,          # Unsupported options: None warns, True raises, False accepts
 )
 ```
 
-Not every backend uses every parameter. Most unsupported parameters are
-ignored; a backend rejects values it cannot safely honor, such as network
-isolation on RunPod.
+Not every backend uses every parameter; the
+[creation options table](#creation-options) lists which backend applies which.
+Each backend declares what it supports, so you can check before creating:
+
+```python
+from bespokelabs.sandbox import backend_capabilities
+
+caps = backend_capabilities("e2b")  # no provider SDK needed
+caps.snapshot             # False
+"gpu" in caps.options     # False
+caps.network_modes        # frozenset({'public'})
+```
+
+`sb.capabilities` and `SandboxClient(...).capabilities` return the same
+`BackendCapabilities` object.
+
+Passing an option the backend does not apply, such as `gpu=` on E2B or
+`workdir=` on Docker, emits an `UnsupportedOptionWarning` naming the option.
+Pass `strict=True` to raise `FeatureNotSupportedError` instead, before anything
+is created, or `strict=False` to accept the backend's behaviour quietly.
+Raising will become the default in a future release. Only options you pass
+yourself are checked; values a preset fills in are chosen per backend. Some
+values are always rejected, whatever `strict` says, because ignoring them
+would be unsafe: a `network=` policy the backend cannot enforce, `dockerfile=`
+on a backend that cannot build, and disabled internet or `snapshot_id` on
+RunPod.
+
+To make warnings errors across a whole program or test suite:
+
+```python
+import warnings
+from bespokelabs.sandbox import UnsupportedOptionWarning
+
+warnings.simplefilter("error", UnsupportedOptionWarning)
+```
 
 Modal GPU sandboxes accept Modal's GPU reservation strings, including a GPU
 type such as `gpu="L4"` or a type and count such as `gpu="H100:2"`:
@@ -1437,6 +1470,7 @@ accepts `-c`; use shell commands for other language runtimes.
 | `upload_file` | `shutil.copy` | `shutil.copy` | `put_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
 | `download_file` | `shutil.copy` | `shutil.copy` | `get_archive` | Actor RPC | Native SDK | via base64 | Native SDK | via SSH | Native SDK |
 | `snapshot` | No | No | Yes | No | No | Yes | Yes | No | No |
+| `session_state()` / resume | Yes | Yes | Yes | No | Yes | Yes | Yes | Yes | Yes |
 | `dockerfile=` | Rejected | Rejected | Local build | Rejected | Declarative build | Rejected | `Image.from_dockerfile` | Rejected | Rejected |
 | `expose_port` | No | No | Published port | No | Preview link + token | No | Tunnel | No | `get_host` |
 | Resource limits | No | No | cpu, memory | cpu (Ray) | cpu, memory, disk | cpu, memory | cpu, memory, gpu | cpu, memory, disk, gpu | Tier-based |
@@ -1455,6 +1489,31 @@ top-level `env_vars` option; inside-agent `AgentSpec.env` can supply per-command
 variables. Its `read_file` converts text stdout to bytes; use `download_file`
 for binary data.
 
+### Creation options
+
+Which `Sandbox(...)` options each backend applies. The table is checked
+against each backend's declared `capabilities` by the test suite; setting an
+option marked No warns, or raises with `strict=True` (see
+[Creating a Sandbox](#creating-a-sandbox)). `preset`, `files`, `git_repo`,
+`git_ref` and `workspace` work everywhere; `dockerfile=` and `network=` are in
+the matrix above.
+
+| Option | Local | Safehouse | Docker | Ray | Daytona | Tensorlake | Modal | RunPod | E2B |
+|---|---|---|---|---|---|---|---|---|---|
+| `cpu=` | No | No | Yes | Yes | Yes | Yes | Yes | Yes | No |
+| `memory_mb=` | No | No | Yes | No | Yes | Yes | Yes | Yes | No |
+| `disk_mb=` | No | No | No | No | Yes | No | No | Yes | No |
+| `gpu=` | No | No | No | No | No | No | Yes | Yes | No |
+| `timeout_secs=` | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| `image=` | No | No | Yes | No | Yes | Yes | Yes | Yes | No |
+| `template=` | No | No | No | No | No | No | No | Yes | Yes |
+| `env_vars=` | Yes | Yes | Yes | Yes | Yes | No | Yes | Yes | Yes |
+| `allow_internet=False` | No | No | Yes | No | No | Yes | No | No | No |
+| `app_name=` | No | No | No | No | No | No | Yes | No | No |
+| `snapshot_id=` | No | No | No | No | Yes | Yes | Yes | No | No |
+| `workdir=` | Yes | Yes | No | No | Yes | Yes | No | Yes | No |
+| `backend_options=` | No | No | Yes | No | Yes | Yes | Yes | Yes | Yes |
+
 ## Exceptions
 
 ```python
@@ -1464,6 +1523,7 @@ from bespokelabs.sandbox import (
     SandboxExecutionError,     # Code or command execution failed
     BackendNotInstalledError,  # pip package missing for chosen backend
     FeatureNotSupportedError,  # Backend doesn't support this operation
+    UnsupportedOptionWarning,  # Warning: a creation option the backend ignores
 )
 ```
 
@@ -1583,6 +1643,7 @@ The test suite exercises Python/API behavior and dashboard asset contracts;
 | `src/bespokelabs/sandbox/backends/` | Lazy-loaded provider clients and sessions, plus the job-only Google Cloud Batch client |
 | `src/bespokelabs/sandbox/_jobs.py` | Job backend lookup and the shared `wait_job` loop |
 | `src/bespokelabs/sandbox/protocols.py`, `types.py`, `exceptions.py` | Backend contracts and shared public types/errors |
+| `src/bespokelabs/sandbox/capabilities.py` | Per-backend capability declarations and the checks built on them |
 | `src/bespokelabs/sandbox/workspace.py`, `_transfer.py` | Manifest entries and directory transfer strategies |
 | `src/bespokelabs/sandbox/agents.py`, `_agent_runtime.py`, `_usage.py` | Agent placement, command preparation, Claude/OpenCode usage parsing |
 | `src/bespokelabs/sandbox/presets.py`, `pricing.py`, `pricing.json` | Preset configuration and bundled compute rates |

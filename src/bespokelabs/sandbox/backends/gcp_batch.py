@@ -39,6 +39,7 @@ import threading
 import uuid
 from typing import Any
 
+from bespokelabs.sandbox.capabilities import BackendCapabilities
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     FeatureNotSupportedError,
@@ -359,8 +360,10 @@ class GcpBatchClient:
     ``cancel_job`` (Batch CancelJob; delete only as a fallback).
     """
 
-    #: Interactive sandboxes are not available on this backend.
-    supports_sessions = False
+    capabilities = BackendCapabilities(
+        sessions=False,
+        jobs=True,
+    )
 
     def __init__(self) -> None:
         try:

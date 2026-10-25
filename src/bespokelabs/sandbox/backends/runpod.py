@@ -16,6 +16,7 @@ import urllib.request
 from collections.abc import Mapping
 from typing import Any
 
+from bespokelabs.sandbox.capabilities import BackendCapabilities
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     FeatureNotSupportedError,
@@ -135,6 +136,25 @@ class _RunpodApi:
 
 class RunpodClient:
     """Factory for SSH-backed RunPod GPU Pods."""
+
+    # allow_internet=False and snapshot_id are read only to be rejected.
+    capabilities = BackendCapabilities(
+        options=frozenset(
+            {
+                "cpu",
+                "memory_mb",
+                "disk_mb",
+                "gpu",
+                "timeout_secs",
+                "image",
+                "env_vars",
+                "template",
+                "workdir",
+                "backend_options",
+            }
+        ),
+        resume=True,
+    )
 
     def __init__(self) -> None:
         ssh_path = shutil.which("ssh")

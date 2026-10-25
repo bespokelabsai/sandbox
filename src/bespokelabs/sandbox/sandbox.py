@@ -26,6 +26,12 @@ from bespokelabs.sandbox.agents import (
     AgentSpec,
 )
 from bespokelabs.sandbox.backends import BACKENDS
+from bespokelabs.sandbox.capabilities import (
+    BackendCapabilities,
+    capabilities_of,
+    check_options,
+    explicit_options,
+)
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     CommandFailedError,
@@ -85,6 +91,13 @@ class Sandbox:
         sb.execute_command("ls /")
         sb.destroy()
 
+    Backends differ in what they support; ``sb.capabilities`` (or
+    ``backend_capabilities(name)`` before creating) says what. Passing an
+    option the backend does not apply, such as ``gpu=`` on E2B, warns with
+    UnsupportedOptionWarning; ``strict=True`` raises FeatureNotSupportedError
+    instead and ``strict=False`` accepts it silently.  Raising will become
+    the default.
+
     When creating many sandboxes on one backend, build a SandboxClient
     once and call client.create(...) instead — provider-level connections
     are then reused across sandboxes.
@@ -115,6 +128,7 @@ class Sandbox:
         git_repo: str | None = None,
         git_ref: str | None = None,
         workspace: Manifest | None = None,
+        strict: bool | None = None,
         _backend_client: SandboxBackendClient | None = None,
     ) -> None:
         # _backend_client is internal: SandboxClient.create() passes its
@@ -126,22 +140,62 @@ class Sandbox:
                 context={"backend": backend},
             )
 
+        # Capabilities are class attributes, so every check against them
+        # runs before the adapter is built: the answer must not depend on
+        # whether that backend's SDK happens to be installed.
+        capabilities = capabilities_of(
+            _backend_client
+            if _backend_client is not None
+            else BACKENDS[backend]
+        )
+        if not capabilities.sessions:
+            raise FeatureNotSupportedError(
+                f"Backend '{backend}' runs detached jobs only; use "
+                f"SandboxClient('{backend}').submit_job(JobSpec(...))",
+                backend=backend,
+                op="create",
+            )
         _check_network_args(
             backend,
             network,
             allow_internet,
             backend_options,
-            _backend_client
-            if _backend_client is not None
-            else BACKENDS[backend],
+            capabilities,
         )
-
         dockerfile_path, context_path = _resolve_dockerfile(
             backend,
             dockerfile,
             context_dir,
             image=image,
             snapshot_id=snapshot_id,
+        )
+        if dockerfile_path is not None and not capabilities.dockerfile:
+            raise FeatureNotSupportedError(
+                f"Backend '{backend}' cannot build from a Dockerfile; use image=",
+                backend=backend,
+                op="create",
+            )
+        # Checks only what the caller passed (preset values are chosen per
+        # backend), and comes last so a request rejected above never warns.
+        check_options(
+            backend,
+            capabilities,
+            explicit_options(
+                cpu=cpu,
+                memory_mb=memory_mb,
+                disk_mb=disk_mb,
+                gpu=gpu,
+                timeout_secs=timeout_secs,
+                image=image,
+                env_vars=env_vars,
+                allow_internet=allow_internet,
+                app_name=app_name,
+                template=template,
+                snapshot_id=snapshot_id,
+                workdir=workdir,
+                backend_options=backend_options,
+            ),
+            strict=strict,
         )
 
         # Resolve preset
@@ -200,21 +254,7 @@ class Sandbox:
             backend_options=backend_options or {},
         )
         self._preset = resolved_preset
-        # Capabilities are class attributes, so check them before the
-        # adapter is built: an unsupported build should not depend on
-        # whether that backend's SDK happens to be installed.
-        if dockerfile_path is not None and not getattr(
-            _backend_client
-            if _backend_client is not None
-            else BACKENDS[backend],
-            "supports_dockerfile",
-            False,
-        ):
-            raise FeatureNotSupportedError(
-                f"Backend '{backend}' cannot build from a Dockerfile; use image=",
-                backend=backend,
-                op="create",
-            )
+        self._capabilities = capabilities
         backend_client = (
             _backend_client
             if _backend_client is not None
@@ -452,7 +492,11 @@ class Sandbox:
                 backend=self._config.backend,
                 op="expose_port",
             )
-        expose = getattr(self._session, "expose_port", None)
+        expose = (
+            getattr(self._session, "expose_port", None)
+            if self._capabilities.expose_port
+            else None
+        )
         if expose is None:
             raise FeatureNotSupportedError(
                 f"Backend '{self._config.backend}' cannot expose ports",
@@ -476,11 +520,23 @@ class Sandbox:
                 backend=self._config.backend,
                 op="set_network",
             )
-        setter = getattr(self._session, "set_network", None)
+        setter = (
+            getattr(self._session, "set_network", None)
+            if self._capabilities.set_network
+            else None
+        )
         if setter is None:
             raise FeatureNotSupportedError(
                 f"Backend '{self._config.backend}' cannot change the network "
                 "policy of a running sandbox",
+                backend=self._config.backend,
+                op="set_network",
+            )
+        if policy.mode not in self._capabilities.set_network:
+            raise FeatureNotSupportedError(
+                f"Backend '{self._config.backend}' cannot switch a running "
+                f"sandbox to network mode '{policy.mode}'; pass it as "
+                "network= at creation",
                 backend=self._config.backend,
                 op="set_network",
             )
@@ -492,6 +548,12 @@ class Sandbox:
     def snapshot(self) -> SnapshotInfo:
         """Save the current sandbox state. Not all backends support this."""
         self._check_alive()
+        if not self._capabilities.snapshot:
+            raise FeatureNotSupportedError(
+                f"Backend '{self._config.backend}' does not support snapshots",
+                backend=self._config.backend,
+                op="snapshot",
+            )
         return self._session.snapshot()
 
     def session_state(self) -> SandboxSessionState:
@@ -504,6 +566,13 @@ class Sandbox:
         (e.g. ray).
         """
         self._check_alive()
+        if not self._capabilities.resume:
+            raise FeatureNotSupportedError(
+                f"Backend '{self._config.backend}' cannot reattach to a "
+                "running sandbox",
+                backend=self._config.backend,
+                op="session_state",
+            )
         return SandboxSessionState(
             backend=self._config.backend,
             data=self._session.session_state(),
@@ -667,6 +736,11 @@ class Sandbox:
         return self._config.backend
 
     @property
+    def capabilities(self) -> BackendCapabilities:
+        """What this sandbox's backend supports."""
+        return self._capabilities
+
+    @property
     def is_alive(self) -> bool:
         return not self._destroyed
 
@@ -744,11 +818,16 @@ class Sandbox:
         backend: str,
         session: SandboxBackendSession,
         config: SandboxConfig,
+        capabilities: BackendCapabilities | None = None,
     ) -> Sandbox:
         """Wrap an existing live backend session (used by resume)."""
-        del backend  # Unused; retained for compatibility with existing callers.
         sb = object.__new__(cls)
         sb._config = config
+        sb._capabilities = (
+            capabilities
+            if capabilities is not None
+            else capabilities_of(BACKENDS.get(backend))
+        )
         sb._preset = None
         sb._session = session
         sb._destroyed = False
@@ -767,6 +846,14 @@ class Sandbox:
             raise SandboxError(
                 f"Session state is for backend '{state.backend}', not '{backend_name}'"
             )
+        capabilities = capabilities_of(backend_client)
+        if not capabilities.resume:
+            raise FeatureNotSupportedError(
+                f"Backend '{backend_name}' cannot reattach to a running "
+                "sandbox",
+                backend=backend_name,
+                op="resume",
+            )
         try:
             session = backend_client.resume(state.data)
         except (SandboxError, BackendNotInstalledError):
@@ -778,7 +865,10 @@ class Sandbox:
                 op="resume",
             ) from exc
         return cls._from_session(
-            backend_name, session, SandboxConfig(backend=backend_name)
+            backend_name,
+            session,
+            SandboxConfig(backend=backend_name),
+            capabilities,
         )
 
 
@@ -814,6 +904,11 @@ class SandboxClient:
     def backend_name(self) -> str:
         return self._backend_name
 
+    @property
+    def capabilities(self) -> BackendCapabilities:
+        """What this client's backend supports."""
+        return capabilities_of(self._backend_client)
+
     def create(
         self,
         *,
@@ -838,6 +933,7 @@ class SandboxClient:
         git_repo: str | None = None,
         git_ref: str | None = None,
         workspace: Manifest | None = None,
+        strict: bool | None = None,
     ) -> Sandbox:
         """Create a new sandbox session.
 
@@ -866,6 +962,7 @@ class SandboxClient:
             git_repo=git_repo,
             git_ref=git_ref,
             workspace=workspace,
+            strict=strict,
             _backend_client=self._backend_client,
         )
 
@@ -1004,7 +1101,7 @@ def _check_network_args(
     network: NetworkPolicy | None,
     allow_internet: bool | None,
     backend_options: dict | None,
-    capabilities: object,
+    capabilities: BackendCapabilities,
 ) -> None:
     """Validate ``network`` against the backend's class-level capabilities.
 
@@ -1025,8 +1122,9 @@ def _check_network_args(
             backend=backend,
             op="create",
         )
-    if network.mode != "public" and network.mode not in getattr(
-        capabilities, "network_modes", ()
+    if (
+        network.mode != "public"
+        and network.mode not in capabilities.network_modes
     ):
         raise FeatureNotSupportedError(
             f"Backend '{backend}' cannot enforce network mode '{network.mode}'",
@@ -1035,8 +1133,7 @@ def _check_network_args(
         )
     # backend_options merge last, so these keys would override the policy.
     clashes = sorted(
-        set(backend_options or ())
-        & set(getattr(capabilities, "network_option_keys", ()))
+        set(backend_options or ()) & capabilities.network_option_keys
     )
     if clashes:
         raise SandboxConfigurationError(

@@ -7,6 +7,7 @@ import pathlib
 import shlex
 import threading
 
+from bespokelabs.sandbox.capabilities import BackendCapabilities
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     FeatureNotSupportedError,
@@ -28,6 +29,26 @@ class TensorlakeClient:
     every session created through this client.
     """
 
+    capabilities = BackendCapabilities(
+        options=frozenset(
+            {
+                "cpu",
+                "memory_mb",
+                "timeout_secs",
+                "image",
+                "allow_internet",
+                "snapshot_id",
+                "workdir",
+                "backend_options",
+            }
+        ),
+        # "none" is enforced through the derived allow_internet flag.
+        network_modes=frozenset({"public", "none"}),
+        network_option_keys=frozenset({"allow_internet_access"}),
+        snapshot=True,
+        resume=True,
+    )
+
     def __init__(self) -> None:
         try:
             from tensorlake.sandbox import (
@@ -42,10 +63,6 @@ class TensorlakeClient:
         # create() may run concurrently (e.g. via AsyncSandboxClient);
         # guard the one-time SDK client construction.
         self._connect_lock = threading.Lock()
-
-    # "none" is enforced through the derived allow_internet flag.
-    network_modes = frozenset({"public", "none"})
-    network_option_keys = frozenset({"allow_internet_access"})
 
     def _ensure_client(self) -> object:
         if self._client is None:

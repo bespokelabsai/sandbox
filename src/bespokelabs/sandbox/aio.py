@@ -30,6 +30,10 @@ from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 from bespokelabs.sandbox import _jobs
 from bespokelabs.sandbox.backends import BACKENDS
+from bespokelabs.sandbox.capabilities import (
+    BackendCapabilities,
+    capabilities_of,
+)
 from bespokelabs.sandbox.exceptions import SandboxConfigurationError
 from bespokelabs.sandbox.presets import SandboxPreset
 from bespokelabs.sandbox.protocols import SandboxBackendClient
@@ -95,6 +99,7 @@ class AsyncSandbox:
         git_repo: str | None = None,
         git_ref: str | None = None,
         workspace: Manifest | None = None,
+        strict: bool | None = None,
     ) -> AsyncSandbox:
         """One-step async creation; mirrors ``Sandbox(backend, ...)``."""
         return await AsyncSandboxClient(backend).create(
@@ -119,6 +124,7 @@ class AsyncSandbox:
             git_repo=git_repo,
             git_ref=git_ref,
             workspace=workspace,
+            strict=strict,
         )
 
     @classmethod
@@ -292,6 +298,11 @@ class AsyncSandbox:
         return self._sandbox.backend_name
 
     @property
+    def capabilities(self) -> BackendCapabilities:
+        """What this sandbox's backend supports."""
+        return self._sandbox.capabilities
+
+    @property
     def is_alive(self) -> bool:
         return self._sandbox.is_alive
 
@@ -331,6 +342,11 @@ class AsyncSandboxClient:
     def backend_name(self) -> str:
         return self._backend_name
 
+    @property
+    def capabilities(self) -> BackendCapabilities:
+        """What this client's backend supports; needs no SDK installed."""
+        return capabilities_of(BACKENDS[self._backend_name])
+
     async def create(
         self,
         *,
@@ -355,6 +371,7 @@ class AsyncSandboxClient:
         git_repo: str | None = None,
         git_ref: str | None = None,
         workspace: Manifest | None = None,
+        strict: bool | None = None,
     ) -> AsyncSandbox:
         """Create a new sandbox session.
 
@@ -385,6 +402,7 @@ class AsyncSandboxClient:
             git_repo=git_repo,
             git_ref=git_ref,
             workspace=workspace,
+            strict=strict,
             _backend_client=backend_client,
         )
         return AsyncSandbox(sandbox)

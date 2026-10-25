@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import pathlib
 
+from bespokelabs.sandbox.capabilities import BackendCapabilities
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     FeatureNotSupportedError,
@@ -25,16 +26,36 @@ from bespokelabs.sandbox.types import (
 class ModalClient:
     """Factory for Modal sandboxes."""
 
-    supports_dockerfile = True
-    network_modes = frozenset({"public", "none", "allowlist"})
-    # cidr_allowlist is the deprecated name of outbound_cidr_allowlist.
-    network_option_keys = frozenset(
-        {
-            "block_network",
-            "outbound_cidr_allowlist",
-            "outbound_domain_allowlist",
-            "cidr_allowlist",
-        }
+    capabilities = BackendCapabilities(
+        options=frozenset(
+            {
+                "cpu",
+                "memory_mb",
+                "gpu",
+                "timeout_secs",
+                "image",
+                "env_vars",
+                "app_name",
+                "snapshot_id",
+                "backend_options",
+            }
+        ),
+        dockerfile=True,
+        network_modes=frozenset({"public", "none", "allowlist"}),
+        # cidr_allowlist is the deprecated name of outbound_cidr_allowlist.
+        network_option_keys=frozenset(
+            {
+                "block_network",
+                "outbound_cidr_allowlist",
+                "outbound_domain_allowlist",
+                "cidr_allowlist",
+            }
+        ),
+        # Modal blocks all egress only at creation.
+        set_network=frozenset({"public", "allowlist"}),
+        expose_port=True,
+        snapshot=True,
+        resume=True,
     )
 
     def __init__(self) -> None:

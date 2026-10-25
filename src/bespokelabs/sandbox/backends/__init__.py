@@ -15,8 +15,9 @@ from bespokelabs.sandbox.backends.tensorlake import TensorlakeClient
 
 # Maps backend name -> backend client class. A client is the per-provider
 # factory: instantiating it verifies the SDK is importable; its create()
-# method produces live sandbox sessions. A class with
-# ``supports_sessions = False`` (gcp_batch) only runs detached jobs.
+# method produces live sandbox sessions. Each class declares what it
+# supports as ``capabilities``; one with ``sessions=False`` (gcp_batch) only
+# runs detached jobs.
 BACKENDS: dict[str, type] = {
     "daytona": DaytonaClient,
     "tensorlake": TensorlakeClient,

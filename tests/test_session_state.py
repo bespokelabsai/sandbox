@@ -217,7 +217,8 @@ class AsyncResumeTests(unittest.IsolatedAsyncioTestCase):
 class BackendOptionsTests(unittest.TestCase):
 
     def test_backend_options_threaded_into_config(self) -> None:
-        sb = Sandbox("local", backend_options={"unused": "ok"})
+        # local ignores backend_options; strict=False accepts that quietly.
+        sb = Sandbox("local", backend_options={"unused": "ok"}, strict=False)
         self.addCleanup(sb.destroy)
         self.assertEqual(sb._config.backend_options, {"unused": "ok"})
 
