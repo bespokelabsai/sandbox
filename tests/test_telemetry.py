@@ -74,6 +74,24 @@ class TelemetryTests(unittest.TestCase):
         self.assertIsNotNone(destroy.lifetime_secs)
         self.assertGreaterEqual(destroy.lifetime_secs, 0)
 
+    def test_run_agent_emits_exec_event(self) -> None:
+        sb = self._sandbox()
+        sb.run_agent("hi")
+        execs = [e for e in self.events if e.op == "exec"]
+        self.assertEqual(len(execs), 1)
+        self.assertEqual(execs[0].extra.get("kind"), "agent")
+
+    def test_listeners_run_when_logging_fails(self) -> None:
+        class Boom(logging.Handler):
+            def emit(self, record):
+                raise RuntimeError("handler")
+
+        h = Boom()
+        telemetry.logger.addHandler(h)
+        self.addCleanup(telemetry.logger.removeHandler, h)
+        self._sandbox().execute_command("true")
+        self.assertTrue(any(e.op == "exec" for e in self.events))
+
     def test_create_failure_records_code_and_type(self) -> None:
         with self.assertRaises(SandboxCreationError):
             self._sandbox(error=RuntimeError("provider said token=abc"))

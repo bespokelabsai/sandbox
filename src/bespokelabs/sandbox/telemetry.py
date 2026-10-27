@@ -98,19 +98,22 @@ def remove_listener(listener: Listener) -> None:
 def emit(event: SandboxEvent) -> None:
     """Log *event* and call listeners.  Never raises."""
     try:
-        failed = event.outcome != "ok"
-        logger.log(
-            logging.WARNING if failed else logging.INFO,
-            "sandbox %s backend=%s outcome=%s duration_secs=%.3f%s",
-            event.op,
-            event.backend,
-            event.outcome,
-            event.duration_secs,
-            f" error_code={event.error_code} error_type={event.error_type}"
-            if failed
-            else "",
-            extra={"sandbox_event": event},
-        )
+        try:
+            failed = event.outcome != "ok"
+            logger.log(
+                logging.WARNING if failed else logging.INFO,
+                "sandbox %s backend=%s outcome=%s duration_secs=%.3f%s",
+                event.op,
+                event.backend,
+                event.outcome,
+                event.duration_secs,
+                f" error_code={event.error_code} error_type={event.error_type}"
+                if failed
+                else "",
+                extra={"sandbox_event": event},
+            )
+        except Exception:  # A broken log handler must not skip listeners.
+            pass
         with _lock:
             listeners = list(_listeners)
         for listener in listeners:

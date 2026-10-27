@@ -600,7 +600,9 @@ class Sandbox:
             args.extend(["--", prompt])
 
         start = time.monotonic()
-        result = self._session.execute_command(command, args)
+        with telemetry.span(telemetry.OP_EXEC, self._config.backend) as sp:
+            result = self._session.execute_command(command, args)
+            sp.set(exit_code=result.exit_code, kind="agent")
         elapsed = time.monotonic() - start
 
         parser = (
