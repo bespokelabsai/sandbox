@@ -602,8 +602,10 @@ class Sandbox:
         start = time.monotonic()
         with telemetry.span(telemetry.OP_EXEC, self._config.backend) as sp:
             result = self._session.execute_command(command, args)
+            # Measure before the span exits: closing it dispatches telemetry
+            # synchronously, which must not count as billable compute time.
+            elapsed = time.monotonic() - start
             sp.set(exit_code=result.exit_code, kind="agent")
-        elapsed = time.monotonic() - start
 
         parser = (
             parse_opencode_result

@@ -120,7 +120,10 @@ def emit(event: SandboxEvent) -> None:
             try:
                 listener(event)
             except Exception:
-                logger.exception("sandbox telemetry listener failed")
+                try:
+                    logger.exception("sandbox telemetry listener failed")
+                except Exception:  # Logging trouble must not skip later listeners.
+                    pass
     except Exception:  # Telemetry must never break a sandbox operation.
         pass
 

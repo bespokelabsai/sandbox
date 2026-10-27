@@ -87,10 +87,35 @@ class TelemetryTests(unittest.TestCase):
                 raise RuntimeError("handler")
 
         h = Boom()
+        previous = telemetry.logger.level
+        telemetry.logger.setLevel(logging.INFO)  # so INFO events reach Boom
         telemetry.logger.addHandler(h)
+        self.addCleanup(telemetry.logger.setLevel, previous)
         self.addCleanup(telemetry.logger.removeHandler, h)
         self._sandbox().execute_command("true")
         self.assertTrue(any(e.op == "exec" for e in self.events))
+
+    def test_later_listeners_run_when_listener_and_logging_fail(self) -> None:
+        class Boom(logging.Handler):
+            def emit(self, record):
+                raise RuntimeError("handler")
+
+        def bad(event):
+            raise RuntimeError("listener")
+
+        seen = []
+        telemetry.add_listener(bad)
+        telemetry.add_listener(seen.append)
+        self.addCleanup(telemetry.remove_listener, bad)
+        self.addCleanup(telemetry.remove_listener, seen.append)
+        h = Boom()
+        previous = telemetry.logger.level
+        telemetry.logger.setLevel(logging.INFO)
+        telemetry.logger.addHandler(h)
+        self.addCleanup(telemetry.logger.setLevel, previous)
+        self.addCleanup(telemetry.logger.removeHandler, h)
+        self._sandbox().execute_command("true")
+        self.assertTrue(any(e.op == "exec" for e in seen))
 
     def test_create_failure_records_code_and_type(self) -> None:
         with self.assertRaises(SandboxCreationError):
