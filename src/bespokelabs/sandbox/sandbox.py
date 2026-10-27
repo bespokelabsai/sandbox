@@ -12,7 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar, overload
 
-from bespokelabs.sandbox import _jobs, _transfer, pricing
+from bespokelabs.sandbox import _jobs, _transfer, pricing, telemetry
 from bespokelabs.sandbox._usage import (
     parse_claude_result,
     parse_opencode_result,
@@ -223,18 +223,23 @@ class Sandbox:
         self._destroyed = False
         self._usage = Usage()
 
-        try:
-            self._session: SandboxBackendSession = backend_client.create(
-                self._config
-            )
-        except (SandboxError, BackendNotInstalledError):
-            raise
-        except Exception as exc:
-            raise SandboxCreationError(
-                f"Failed to create sandbox on '{backend}': {exc}",
-                backend=backend,
-                op="create",
-            ) from exc
+        preset_name = resolved_preset.name if resolved_preset else None
+        with telemetry.span(
+            telemetry.OP_CREATE, backend, preset=preset_name
+        ):
+            try:
+                self._session: SandboxBackendSession = backend_client.create(
+                    self._config
+                )
+            except (SandboxError, BackendNotInstalledError):
+                raise
+            except Exception as exc:
+                raise SandboxCreationError(
+                    f"Failed to create sandbox on '{backend}': {exc}",
+                    backend=backend,
+                    op="create",
+                ) from exc
+        self._created_at = time.monotonic()
 
         # Skip setup commands if the preset image was used (everything
         # is already baked into the image).  Fall back to setup_commands
@@ -250,17 +255,20 @@ class Sandbox:
         # Any failure destroys the sandbox.
         try:
             needs_setup = resolved_preset is not None and not using_preset_image
-            if needs_setup and resolved_preset.setup_before_workspace:
-                self._run_preset_setup(resolved_preset)
-            if git_repo:
-                self._clone_repo(git_repo, git_ref)
-            if files:
-                for path, content in files.items():
-                    self._session.write_file(path, content)
-            if workspace is not None:
-                workspace.apply(self)
-            if needs_setup and not resolved_preset.setup_before_workspace:
-                self._run_preset_setup(resolved_preset)
+            with telemetry.span(
+                telemetry.OP_SETUP, backend, preset=preset_name
+            ):
+                if needs_setup and resolved_preset.setup_before_workspace:
+                    self._run_preset_setup(resolved_preset)
+                if git_repo:
+                    self._clone_repo(git_repo, git_ref)
+                if files:
+                    for path, content in files.items():
+                        self._session.write_file(path, content)
+                if workspace is not None:
+                    workspace.apply(self)
+                if needs_setup and not resolved_preset.setup_before_workspace:
+                    self._run_preset_setup(resolved_preset)
         except Exception:
             self.destroy()
             raise
@@ -300,7 +308,9 @@ class Sandbox:
         accepts ``**kwargs``.
         """
         self._check_alive()
-        result = self._session.execute_code(code, language)
+        with telemetry.span(telemetry.OP_EXEC, self._config.backend) as sp:
+            result = self._session.execute_code(code, language)
+            sp.set(exit_code=result.exit_code, kind="code")
         if return_type is not None:
             return _parse_result(result, return_type)
         return result
@@ -341,7 +351,9 @@ class Sandbox:
         if return_type is not None and inject_schema and args:
             args = list(args)
             args[-1] = args[-1] + " " + json_schema(return_type)
-        result = self._session.execute_command(command, args)
+        with telemetry.span(telemetry.OP_EXEC, self._config.backend) as sp:
+            result = self._session.execute_command(command, args)
+            sp.set(exit_code=result.exit_code, kind="command")
         if return_type is not None:
             return _parse_result(result, return_type)
         return result
@@ -643,7 +655,15 @@ class Sandbox:
     def destroy(self) -> None:
         """Terminate and clean up the sandbox."""
         if not self._destroyed:
-            self._session.destroy()
+            created = getattr(self, "_created_at", None)
+            with telemetry.span(
+                telemetry.OP_DESTROY,
+                self._config.backend,
+                lifetime_secs=(
+                    time.monotonic() - created if created is not None else None
+                ),
+            ):
+                self._session.destroy()
             self._destroyed = True
 
     # -- Context manager ---------------------------------------------------
@@ -753,6 +773,7 @@ class Sandbox:
         sb._session = session
         sb._destroyed = False
         sb._usage = Usage()
+        sb._created_at = time.monotonic()
         return sb
 
     @classmethod

@@ -1523,6 +1523,27 @@ conversation, posts replies, and retries interrupted deliveries. No inbox
 polling or model calls happen while idle. Start with
 [`examples/envy_listener.py`](examples/envy_listener.py).
 
+## Lifecycle telemetry
+
+Every `create`, `setup` (preset, clone, files, workspace), `exec`, and
+`destroy` emits one `telemetry.SandboxEvent` with backend, duration, outcome,
+and the stable error code. Events are logged to
+`bespokelabs.sandbox.telemetry` (WARNING on failure) and passed to listeners:
+
+```python
+from bespokelabs.sandbox import telemetry
+
+telemetry.add_listener(
+    lambda e: statsd.timing(
+        f"sandbox.{e.op}", e.duration_secs * 1000,
+        tags=[f"backend:{e.backend}", f"outcome:{e.outcome}"],
+    )
+)
+```
+
+A command that exits non-zero is `outcome="ok"` with `exit_code` set. Events
+never include commands, code, paths, env vars, or error messages.
+
 ## Examples
 
 Run examples from a source checkout after installing the package. Each script
