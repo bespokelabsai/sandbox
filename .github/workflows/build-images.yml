@@ -53,7 +53,7 @@ jobs:
             else
               # Validate single image input: must be a simple basename
               if ! [[ "$INPUT" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
-                echo "::error::Invalid image name '$INPUT'. Must match ^[a-z0-9][a-z0-9_-]*$" >&2
+                echo "::error::Invalid image name. Must match ^[a-z0-9][a-z0-9_-]*$" >&2
                 exit 1
               fi
               # Verify the directory exists
