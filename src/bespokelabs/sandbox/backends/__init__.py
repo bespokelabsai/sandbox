@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bespokelabs.sandbox.backends.boxd import BoxdClient
 from bespokelabs.sandbox.backends.daytona import DaytonaClient
 from bespokelabs.sandbox.backends.docker import DockerClient
 from bespokelabs.sandbox.backends.e2b import E2BClient
@@ -27,5 +28,6 @@ BACKENDS: dict[str, type] = {
     "ray": RayClient,
     "runpod": RunpodClient,
     "safehouse": SafehouseClient,
+    "boxd": BoxdClient,
     "gcp_batch": GcpBatchClient,
 }

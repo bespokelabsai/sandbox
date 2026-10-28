@@ -15,6 +15,7 @@ _PROVIDER_ENVIRONMENT = {
     "modal": ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"),
     "runpod": ("RUNPOD_API_KEY",),
     "tensorlake": ("TENSORLAKE_API_KEY",),
+    "boxd": ("BOXD_API_KEY",),
 }
 
 
