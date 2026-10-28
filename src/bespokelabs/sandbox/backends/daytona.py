@@ -849,8 +849,11 @@ class DaytonaSession:
 
     def _record_gap(self, *, now: float | None = None) -> float:
         """Fold the gap since the last activity mark into the max; reset."""
-        now = time.monotonic() if now is None else now
         with self._activity_lock:
+            # Read the clock under the lock, so a concurrent _mark_activity can
+            # never store a newer stamp that this call then overwrites with a
+            # stale one (which would move _last_activity backwards).
+            now = time.monotonic() if now is None else now
             gap = max(0.0, now - self._last_activity)
             self._last_activity = now
             self._max_gap = max(self._max_gap, gap)

@@ -6,6 +6,7 @@ never create, start, stop or delete a real sandbox.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import socket
@@ -82,6 +83,36 @@ class _FakeSandbox:
         self.id = sandbox_id
         self.labels = labels
         self.process = _FakeProcess()
+
+
+@contextlib.contextmanager
+def _captured_param_kwargs():
+    """Record the kwargs every Daytona params constructor receives.
+
+    Params models ignore unknown fields, so inspecting the built object cannot
+    show that a backend-only option leaked into the constructor call.
+    """
+    import daytona  # type: ignore[import-untyped]
+
+    sent: list[dict] = []
+
+    def spy(cls):
+        def build(*args, **kwargs):
+            sent.append(dict(kwargs))
+            return cls(*args, **kwargs)
+
+        return build
+
+    with mock.patch.object(
+        daytona,
+        "CreateSandboxFromSnapshotParams",
+        spy(daytona.CreateSandboxFromSnapshotParams),
+    ), mock.patch.object(
+        daytona,
+        "CreateSandboxFromImageParams",
+        spy(daytona.CreateSandboxFromImageParams),
+    ):
+        yield sent
 
 
 class _FakeDaytona:
@@ -823,16 +854,18 @@ class DaytonaKeepaliveTests(unittest.TestCase):
                 60,
             )
         fake = _FakeDaytona()
-        session = _client(fake).create(
-            SandboxConfig(
-                backend="daytona",
-                backend_options={"keepalive_interval_secs": 120},
+        with _captured_param_kwargs() as sent:
+            session = _client(fake).create(
+                SandboxConfig(
+                    backend="daytona",
+                    backend_options={"keepalive_interval_secs": 120},
+                )
             )
-        )
         self.assertEqual(session._keepalive_secs, 120)
         # Consumed here, never sent to Daytona, and carried across resume.
-        params, _ = fake.created[0]
-        self.assertNotIn("keepalive_interval_secs", params.model_fields_set)
+        self.assertTrue(sent)
+        for kwargs in sent:
+            self.assertNotIn("keepalive_interval_secs", kwargs)
         self.assertEqual(
             session.session_state()["keepalive_interval_secs"], 120
         )
@@ -957,26 +990,28 @@ class DaytonaIdleGapMetricTests(unittest.TestCase):
 
     def test_label_mapping_from_backend_options(self) -> None:
         fake = _FakeDaytona()
-        session = _client(fake).create(
-            SandboxConfig(
-                backend="daytona",
-                snapshot_id="snap",
-                backend_options={
-                    "labels": {
-                        "example-pipeline-label": "example-pipeline",
-                        "example-caller-label": "example-caller",
+        with _captured_param_kwargs() as sent:
+            session = _client(fake).create(
+                SandboxConfig(
+                    backend="daytona",
+                    snapshot_id="snap",
+                    backend_options={
+                        "labels": {
+                            "example-pipeline-label": "example-pipeline",
+                            "example-caller-label": "example-caller",
+                        },
+                        "metric_tag_labels": {
+                            "pipeline": "example-pipeline-label",
+                            "caller": "example-caller-label",
+                            "team": "absent-label",
+                        },
                     },
-                    "metric_tag_labels": {
-                        "pipeline": "example-pipeline-label",
-                        "caller": "example-caller-label",
-                        "team": "absent-label",
-                    },
-                },
+                )
             )
-        )
         # Consumed here, never sent to Daytona.
-        params, _ = fake.created[0]
-        self.assertNotIn("metric_tag_labels", params.model_fields_set)
+        self.assertTrue(sent)
+        for kwargs in sent:
+            self.assertNotIn("metric_tag_labels", kwargs)
         self.assertEqual(session._tags["pipeline"], "example-pipeline")
         self.assertEqual(session._tags["caller"], "example-caller")
         # A mapped label the sandbox does not carry adds no tag.
@@ -1129,6 +1164,14 @@ class MetricsSinkTests(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, env, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def test_tag_line_breaks_cannot_split_a_datagram(self) -> None:
+        datagram = _metrics._datagram(
+            "x.y", 1.0, {"k\nj": "a\r\nb,c|d#e"}
+        ).decode()
+        self.assertNotIn("\n", datagram)
+        self.assertNotIn("\r", datagram)
+        self.assertIn("k_j:a__b_c_d_e", datagram)
 
     def test_no_op_without_a_sink(self) -> None:
         with mock.patch.object(_metrics.socket, "socket") as make_socket:

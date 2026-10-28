@@ -105,8 +105,16 @@ def _statsd_socket() -> socket.socket | None:
 
 
 def _clean(value: str) -> str:
-    # DogStatsD reserves ',', '|' and '#' in the tag section.
-    return str(value).replace(",", "_").replace("|", "_").replace("#", "_")
+    # DogStatsD reserves ',', '|' and '#' in the tag section, and a line break
+    # is the packet separator: it would truncate the tag and split the datagram.
+    return (
+        str(value)
+        .replace(",", "_")
+        .replace("|", "_")
+        .replace("#", "_")
+        .replace("\r", "_")
+        .replace("\n", "_")
+    )
 
 
 def _datagram(name: str, value: float, tags: Mapping[str, str]) -> bytes:
