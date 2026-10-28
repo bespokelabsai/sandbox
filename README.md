@@ -540,8 +540,71 @@ can go well over an hour without one) and
 `auto_delete_interval=60` (delete an hour after stopping; this SDK cannot
 restart a stopped sandbox). Each value passed in `backend_options` is kept as
 given, 0 included; `ephemeral` counts as an auto-delete choice and
-`auto_pause_interval` as an auto-stop one. A single blocking call that can run
-past four hours should pass its own `auto_stop_interval`.
+`auto_pause_interval` as an auto-stop one. With the keepalive below turned
+off, a single blocking call that can run past four hours should pass its own
+`auto_stop_interval`.
+
+While a blocking `execute_command` or `execute_code` call is in flight, the
+Daytona backend also calls the SDK's `Sandbox.refresh_activity()`
+(`POST /sandbox/{id}/last-activity`) every 5 minutes, so the idle clock cannot
+run out under a call that is still working. The heartbeat stops when the call
+returns or raises. It is best effort: each refresh has a 30-second request
+timeout, a failure is logged and never fails the call, and after 3 failures in
+a row it gives up for the rest of that call. Set the interval in seconds with
+`backend_options={"keepalive_interval_secs": ...}` or the
+`BESPOKELABS_SANDBOX_DAYTONA_KEEPALIVE_SECS` environment variable; 0 turns it
+off. The interval in effect (from either source) is carried in
+`session_state()`, so a resumed session keeps it whatever the resuming
+process's environment says.
+Processes started in the background and polled are not covered by it; the
+polling calls themselves are activity.
+
+#### Idle-gap metrics (Daytona)
+
+The Daytona backend measures how long each sandbox goes without activity. This
+is the evidence the idle auto-stop default is set from.
+
+| Metric | Type | When |
+|---|---|---|
+| `bespokelabs.sandbox.idle_gap_seconds` | distribution | For each Toolbox call (exec, code run, file list, read, write, upload, download): seconds from the sandbox's last activity to the start of the call. Emitted when the call returns, so a slow sink never delays it. |
+| `bespokelabs.sandbox.max_idle_gap_seconds` | distribution | Once, at `destroy()` (after the delete): the largest gap the sandbox saw, including the idle time from its last activity to `destroy()`. |
+
+"Activity" is the start or end of a Toolbox call, or a successful keepalive.
+The clock starts when the session is created or resumed. So a long blocking
+exec does not count as a gap, but the silence after it does.
+
+Tags: `backend:daytona`, `sandbox_class` (from the sandbox's resources, such as
+`cpu2-mem4g`, or `unknown`), `op` (on `idle_gap_seconds` only), and `caller`
+from `BESPOKELABS_SANDBOX_CALLER` when it is set.
+
+Sandbox labels can also become tags. No label is read by default; name the
+mapping from tag to label key with
+`backend_options={"metric_tag_labels": {"pipeline": "my-pipeline-label"}}`, or
+with the `BESPOKELABS_SANDBOX_METRIC_TAG_LABELS` environment variable as
+`pipeline=label-a,caller=label-b` (malformed entries are logged and skipped).
+The option takes precedence over the variable, and the mapping in effect
+(an explicit empty one included) is carried in `session_state()`. A mapped label the sandbox carries sets its tag,
+and a `caller` label wins over `BESPOKELABS_SANDBOX_CALLER`. Tags in
+`backend_options={"metric_tags": {...}}` are added last and win.
+
+Each point goes to exactly one sink, the first that applies:
+
+1. A callable registered with `bespokelabs.sandbox.set_metrics_sink(fn)`, called
+   as `fn(name, value, tags)`. Use it to bridge to an existing metrics client,
+   such as a Datadog HTTP submitter. It runs synchronously on the caller's
+   thread, so keep it fast and hand slow work to a queue or thread.
+2. DogStatsD to a local Datadog Agent, when `DD_DOGSTATSD_SOCKET` (Unix socket)
+   or `DD_AGENT_HOST` / `DD_DOGSTATSD_HOST` (UDP, port `DD_DOGSTATSD_PORT`,
+   default 8125) is set. `DD_ENV` and `DD_SERVICE` become `env` and `service`
+   tags. If the socket cannot be opened yet, setup is retried every 30
+   seconds, so points resume once the agent is up.
+3. Otherwise nothing is sent. There is no extra dependency.
+
+Every point is also written as one JSON log line on the
+`bespokelabs.sandbox.metrics` logger: `max_idle_gap_seconds` at INFO, and the
+per-call `idle_gap_seconds` at DEBUG so a polling loop does not flood INFO logs.
+Emission never raises, and happens after the call it measures (and after the
+delete, for `destroy()`), so it can never delay the call or the cleanup.
 
 Constructing a `Sandbox` creates the underlying sandbox immediately. To launch
 many sandboxes on one backend, or to use `async`/`await`, see
