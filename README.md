@@ -528,8 +528,20 @@ destroys the sandbox when that deadline elapses in whatever state it is in,
 running work included; no activity resets the clock, and the clock starts at
 creation, so image pull and boot count against it. The mapping happens only
 when you pass `timeout_secs` yourself. Omit it — including when a preset
-supplies its own recommended value — and the Daytona sandbox gets no TTL at
-all, leaving it bounded only by Daytona's default 15-minute idle auto-stop.
+supplies its own recommended value — and the Daytona sandbox gets a one-day
+`ttl_minutes` backstop instead.
+
+Daytona's idle auto-stop default comes from the organization and can be off,
+and a sandbox that never stops is never auto-deleted either. So when the caller
+sets none of them, the Daytona backend also sets `auto_stop_interval=240` (stop
+after four hours with no Toolbox call: every exec and file operation is one, but
+processes inside the sandbox are not, and a single long blocking agent call
+can go well over an hour without one) and
+`auto_delete_interval=60` (delete an hour after stopping; this SDK cannot
+restart a stopped sandbox). Each value passed in `backend_options` is kept as
+given, 0 included; `ephemeral` counts as an auto-delete choice and
+`auto_pause_interval` as an auto-stop one. A single blocking call that can run
+past four hours should pass its own `auto_stop_interval`.
 
 Constructing a `Sandbox` creates the underlying sandbox immediately. To launch
 many sandboxes on one backend, or to use `async`/`await`, see

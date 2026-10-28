@@ -45,6 +45,32 @@ _CREATE_TOKEN_LABEL = "bespokelabs.sandbox/create-token"
 # backend_options key that overrides the deadline passed to Daytona.create().
 _CREATE_TIMEOUT_OPTION = "create_timeout"
 
+# Lifecycle defaults for a sandbox whose caller set none (see
+# _apply_lifecycle_defaults).
+#
+# Idle stop: Daytona resets this clock on every Toolbox API call, and every
+# exec, file read and file write this backend makes is one.  Processes inside
+# the sandbox do not reset it, and Daytona does not document whether a call
+# still in flight counts as activity.  A long single blocking agent call can
+# run past an hour, and so make no Toolbox call for well over an hour while
+# the work is very much alive, so
+# the window is 4 hours, not 1.  A driver silent for that long is gone; the
+# idle stop is a backstop for a killed driver, not a tight cost control.  A
+# blocking call that may run longer still should pass an explicit
+# backend_options auto_stop_interval, or run in the background and be polled.
+_DEFAULT_AUTO_STOP_MINUTES = 4 * 60
+# Delete after stop: this backend never stops a sandbox itself and resume()
+# does not restart one, so a stopped sandbox is already unusable from here.
+# The hour is only a grace period for someone to inspect or restart it by
+# hand; after that it is disk and quota held for nothing.
+_DEFAULT_AUTO_DELETE_MINUTES = 60
+# Wall-clock backstop when no timeout_secs was given: destroys the sandbox in
+# any state, active or not, so it also bounds a sandbox kept awake by a
+# runaway poller.  A day is far above any run the agent presets plan for
+# (their recommended timeouts are 30 minutes), so it cannot cut off normal
+# work; anything longer passes timeout_secs, or ttl_minutes=0 to disable.
+_DEFAULT_TTL_MINUTES = 24 * 60
+
 
 @dataclass(frozen=True)
 class _CleanupReport:
@@ -377,6 +403,33 @@ def _network_params(
     return {"domain_allow_list": ",".join(policy.domains)}
 
 
+def _apply_lifecycle_defaults(common: dict) -> None:
+    """Bound a sandbox whose caller set no lifecycle of its own.
+
+    Daytona's documented 15-minute idle auto-stop is only the *SDK-side*
+    description; the effective default is the organization's, which can be
+    off.  Where it is off, a sandbox created with nothing set never stops,
+    so the auto-delete and auto-archive timers (which only count while
+    stopped) never start either, and a driver that dies without reaching
+    destroy() (SIGKILL, OOM, a preempted VM) leaves it billing indefinitely.
+    Each default below fills a field only when the caller passed nothing for
+    it, through timeout_secs or backend_options; an explicit value, including
+    0 ("disabled"), is kept as given.
+    """
+    # At most one of auto_stop_interval and auto_pause_interval may be
+    # non-zero, so a caller who chose auto-pause gets no auto-stop default.
+    if "auto_stop_interval" not in common and not common.get(
+        "auto_pause_interval"
+    ):
+        common["auto_stop_interval"] = _DEFAULT_AUTO_STOP_MINUTES
+    # ephemeral is itself an auto-delete setting (it forces 0), so either key
+    # means the caller decided.
+    if "auto_delete_interval" not in common and "ephemeral" not in common:
+        common["auto_delete_interval"] = _DEFAULT_AUTO_DELETE_MINUTES
+    if "ttl_minutes" not in common:
+        common["ttl_minutes"] = _DEFAULT_TTL_MINUTES
+
+
 def _build_params(config: SandboxConfig, *, create_token: str) -> object:
     """Build the appropriate Daytona params object for the config.
 
@@ -407,7 +460,7 @@ def _build_params(config: SandboxConfig, *, create_token: str) -> object:
     # is the only absolute bound Daytona offers, so that is what it maps to.
     # The auto_* intervals cannot stand in.  Per
     # https://www.daytona.io/docs/en/sandboxes/#automated-lifecycle-management
-    # auto_stop_interval is an *idle* timer (default 15 minutes) that "triggers
+    # auto_stop_interval is an *idle* timer that "triggers
     # even if there are internal processes running", but its clock is reset by
     # every Toolbox API call -- which is what every exec, file read and file
     # write in this backend is.  A sandbox a driver polls every 10s therefore
@@ -418,10 +471,11 @@ def _build_params(config: SandboxConfig, *, create_token: str) -> object:
     # But ttl_minutes (same page, #wall-clock-ttl) destroys the sandbox "in any
     # state: started, stopped, paused, or archived", counts wall-clock from
     # creation (snapshot pull and boot included), and is reset by no activity
-    # at all.  That is a lifetime cap, not a recommendation, so it is set only
-    # from a timeout_secs the caller actually asked for -- never from the
+    # at all.  That is a lifetime cap, not a recommendation, so it is derived
+    # only from a timeout_secs the caller actually asked for -- never from the
     # preset or dataclass default, which would silently kill running work at
-    # 30 or 10 minutes.
+    # 30 or 10 minutes.  Without one, _apply_lifecycle_defaults below sets the
+    # generous _DEFAULT_TTL_MINUTES backstop instead.
     #
     # Rounded up, and floored at Daytona's 1-minute granularity, because
     # ttl_minutes=0 means "no TTL" -- the opposite of a sub-minute bound.
@@ -436,6 +490,9 @@ def _build_params(config: SandboxConfig, *, create_token: str) -> object:
         common.update(options)
         if option_env and config.env_vars:
             common["env_vars"] = {**config.env_vars, **option_env}
+
+    # After backend_options, so a value the caller passed there always wins.
+    _apply_lifecycle_defaults(common)
 
     # Stamped after backend_options so a caller's labels can add to the reap
     # handle but never replace it.
