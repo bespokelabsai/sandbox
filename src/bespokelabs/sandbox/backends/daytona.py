@@ -1032,7 +1032,9 @@ class DaytonaSession:
             state[_KEEPALIVE_OPTION] = self._keepalive_option
         if self._metric_tags_option:
             state[_METRIC_TAGS_OPTION] = dict(self._metric_tags_option)
-        if self._metric_tag_labels:
+        # `is not None`, so an explicit empty mapping is carried too and a
+        # resume does not fall back to the environment's mapping.
+        if self._metric_tag_labels is not None:
             state[_METRIC_TAG_LABELS_OPTION] = dict(self._metric_tag_labels)
         return state
 

@@ -1024,6 +1024,28 @@ class DaytonaIdleGapMetricTests(unittest.TestCase):
         resumed = _client(fake).resume(state)
         self.assertEqual(resumed._tags["pipeline"], "example-pipeline")
 
+    def test_explicit_empty_label_mapping_survives_resume(self) -> None:
+        fake = _FakeDaytona()
+        config = SandboxConfig(
+            backend="daytona",
+            snapshot_id="snap",
+            backend_options={
+                "labels": {"label-a": "example-pipeline"},
+                "metric_tag_labels": {},
+            },
+        )
+        env = {daytona_backend._METRIC_TAG_LABELS_ENV: "pipeline=label-a"}
+        with mock.patch.dict(os.environ, env):
+            session = _client(fake).create(config)
+            self.assertNotIn("pipeline", session._tags)
+            state = session.session_state()
+            self.assertEqual(state["metric_tag_labels"], {})
+            # Resumed where the env var maps the label, the explicit empty
+            # mapping still wins.
+            fake.get = lambda sandbox_id: fake.live[0]  # noqa: E731
+            resumed = _client(fake).resume(state)
+        self.assertNotIn("pipeline", resumed._tags)
+
     def test_caller_label_wins_over_caller_env(self) -> None:
         with mock.patch.dict(
             os.environ,

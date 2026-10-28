@@ -582,8 +582,8 @@ mapping from tag to label key with
 `backend_options={"metric_tag_labels": {"pipeline": "my-pipeline-label"}}`, or
 with the `BESPOKELABS_SANDBOX_METRIC_TAG_LABELS` environment variable as
 `pipeline=label-a,caller=label-b` (malformed entries are logged and skipped).
-The option takes precedence over the variable, and the mapping in effect is
-carried in `session_state()`. A mapped label the sandbox carries sets its tag,
+The option takes precedence over the variable, and the mapping in effect
+(an explicit empty one included) is carried in `session_state()`. A mapped label the sandbox carries sets its tag,
 and a `caller` label wins over `BESPOKELABS_SANDBOX_CALLER`. Tags in
 `backend_options={"metric_tags": {...}}` are added last and win.
 
