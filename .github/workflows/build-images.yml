@@ -43,13 +43,26 @@ jobs:
           fetch-depth: 2
 
       - id: set-matrix
+        env:
+          INPUT: ${{ github.event.inputs.image }}
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            INPUT="${{ github.event.inputs.image }}"
             if [[ "$INPUT" == "all" || -z "$INPUT" ]]; then
+              # Build all images
               IMAGES=$(ls -d images/*/ | xargs -I{} basename {} | jq -R -s -c 'split("\n") | map(select(. != ""))')
             else
-              IMAGES=$(echo "[\"$INPUT\"]")
+              # Validate single image input: must be a simple basename
+              if ! [[ "$INPUT" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+                echo "::error::Invalid image name '$INPUT'. Must match ^[a-z0-9][a-z0-9_-]*$" >&2
+                exit 1
+              fi
+              # Verify the directory exists
+              if [[ ! -d "images/$INPUT" ]]; then
+                echo "::error::Image directory 'images/$INPUT' does not exist" >&2
+                exit 1
+              fi
+              # Build JSON array with jq (safe, no manual JSON construction)
+              IMAGES=$(jq -cn --arg image "$INPUT" '[$image]')
             fi
           else
             # On push, only build images whose Dockerfile changed
