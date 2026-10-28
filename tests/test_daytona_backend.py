@@ -7,6 +7,7 @@ never create, start, stop or delete a real sandbox.
 from __future__ import annotations
 
 import unittest
+import warnings
 
 from bespokelabs.sandbox import Sandbox, SandboxPreset
 from bespokelabs.sandbox.exceptions import (
@@ -415,16 +416,15 @@ class DaytonaDroppedConfigTests(unittest.TestCase):
             2,
         )
 
-    def test_unrequested_timeout_secs_sets_no_ttl_at_all(self) -> None:
+    def test_unrequested_timeout_secs_does_not_become_the_ttl(self) -> None:
         # ttl_minutes destroys the sandbox in any state and no activity resets
         # it, so a value nobody asked for must not become a lifetime cap: not
         # the 600s dataclass default, and not the 1800s the agent presets
-        # recommend.
+        # recommend.  The sandbox gets the one-day backstop instead.
         for timeout_secs in (600, 1800):
             with self.subTest(timeout_secs=timeout_secs):
                 params = self._params(timeout_secs=timeout_secs)
-                self.assertIsNone(params.ttl_minutes)
-                self.assertNotIn("ttl_minutes", params.model_fields_set)
+                self.assertEqual(params.ttl_minutes, 24 * 60)
 
     def test_backend_options_can_still_set_the_ttl(self) -> None:
         # It overrides a derived TTL...
@@ -538,6 +538,112 @@ class TimeoutSecsExplicitnessTests(unittest.TestCase):
         self.assertEqual(config.timeout_secs, 1800)
         # ...but it must not turn into a 30-minute destroy on Daytona.
         self.assertFalse(config.timeout_secs_explicit)
+
+
+@unittest.skipUnless(_HAS_DAYTONA, "Daytona SDK not installed")
+class DaytonaLifecycleDefaultsTests(unittest.TestCase):
+    """A sandbox whose caller set no lifecycle must still end on its own.
+
+    The organization default for auto-stop can be off, and with no stop the
+    auto-delete timer never starts either: a driver killed before destroy()
+    leaves the sandbox running forever.
+    """
+
+    def _params(self, **config_kwargs):
+        config = SandboxConfig(
+            backend="daytona", snapshot_id="snap", **config_kwargs
+        )
+        return _build_params(config, create_token="tok")
+
+    def test_nothing_set_gets_idle_stop_delete_after_stop_and_ttl(
+        self,
+    ) -> None:
+        params = self._params()
+        self.assertEqual(params.auto_stop_interval, 240)
+        self.assertEqual(params.auto_delete_interval, 60)
+        self.assertEqual(params.ttl_minutes, 24 * 60)
+
+    def test_defaults_reach_image_params_too(self) -> None:
+        config = SandboxConfig(backend="daytona", image="python:3.12-slim")
+        params = _build_params(config, create_token="tok")
+        self.assertEqual(
+            (
+                params.auto_stop_interval,
+                params.auto_delete_interval,
+                params.ttl_minutes,
+            ),
+            (240, 60, 24 * 60),
+        )
+
+    def test_idle_stop_outlasts_a_long_blocking_agent_call(self) -> None:
+        # A long single blocking agent call can make no Toolbox call for well
+        # over an hour; a 60-minute idle stop would stop it mid-run.
+        self.assertGreaterEqual(self._params().auto_stop_interval, 4 * 60)
+
+    def test_explicit_values_are_kept_including_zero(self) -> None:
+        # 0 means "disabled" for auto-stop and TTL and "delete on stop" for
+        # auto-delete; each is a decision, not an absence.
+        params = self._params(
+            backend_options={
+                "auto_stop_interval": 0,
+                "auto_delete_interval": 0,
+                "ttl_minutes": 0,
+            }
+        )
+        self.assertEqual(params.auto_stop_interval, 0)
+        self.assertEqual(params.auto_delete_interval, 0)
+        self.assertEqual(params.ttl_minutes, 0)
+
+        params = self._params(
+            backend_options={
+                "auto_stop_interval": 15,
+                "auto_delete_interval": 600,
+            }
+        )
+        self.assertEqual(params.auto_stop_interval, 15)
+        self.assertEqual(params.auto_delete_interval, 600)
+
+    def test_each_field_defaults_independently(self) -> None:
+        # A caller who bounded only idle time still gets the other two.
+        params = self._params(backend_options={"auto_stop_interval": 0})
+        self.assertEqual(params.auto_stop_interval, 0)
+        self.assertEqual(params.auto_delete_interval, 60)
+        self.assertEqual(params.ttl_minutes, 24 * 60)
+
+    def test_explicit_timeout_secs_replaces_the_ttl_backstop(self) -> None:
+        # A run longer than a day asks for it, and gets it.
+        params = self._params(
+            timeout_secs=3 * 24 * 60 * 60, timeout_secs_explicit=True
+        )
+        self.assertEqual(params.ttl_minutes, 3 * 24 * 60)
+        self.assertEqual(params.auto_stop_interval, 240)
+
+    def test_ephemeral_caller_gets_no_conflicting_auto_delete(self) -> None:
+        # ephemeral forces auto_delete_interval=0 and the SDK warns when both
+        # are set, so ephemeral alone counts as the caller's decision.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            params = self._params(backend_options={"ephemeral": True})
+        self.assertEqual(params.auto_delete_interval, 0)
+        self.assertEqual(params.auto_stop_interval, 240)
+
+        params = self._params(backend_options={"ephemeral": False})
+        self.assertIsNone(params.auto_delete_interval)
+
+    def test_auto_pause_caller_gets_no_auto_stop(self) -> None:
+        # Daytona allows at most one of auto-stop and auto-pause non-zero.
+        params = self._params(backend_options={"auto_pause_interval": 30})
+        self.assertIsNone(params.auto_stop_interval)
+        self.assertNotIn("auto_stop_interval", params.model_fields_set)
+        self.assertEqual(params.ttl_minutes, 24 * 60)
+
+    def test_defaults_reach_the_create_call(self) -> None:
+        fake = _FakeDaytona()
+        _client(fake).create(SandboxConfig(backend="daytona"))
+        params, _ = fake.created[0]
+        self.assertEqual(params.auto_stop_interval, 240)
+        self.assertEqual(params.auto_delete_interval, 60)
+        self.assertEqual(params.ttl_minutes, 24 * 60)
 
 
 if __name__ == "__main__":

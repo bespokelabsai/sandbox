@@ -94,7 +94,8 @@ class SandboxConfig:
         caller rather than inherited from a preset or from the default above.
         Set by ``Sandbox(...)``; only Daytona reads it, because there
         timeout_secs becomes ttl_minutes -- a hard wall-clock destroy -- and a
-        value nobody asked for must not silently cap a sandbox's lifetime.
+        value nobody asked for must not silently cap a sandbox's lifetime
+        (without it Daytona gets a one-day TTL backstop instead).
       - workdir: Local, Safehouse (host directory used as the sandbox root),
                  Tensorlake, Daytona, RunPod (command working directory;
                  Tensorlake defaults to /tmp, RunPod to /workspace)
