@@ -6,15 +6,23 @@ never create, start, stop or delete a real sandbox.
 
 from __future__ import annotations
 
+import logging
+import os
+import socket
+import tempfile
+import threading
+import time
 import unittest
 import warnings
+from unittest import mock
 
-from bespokelabs.sandbox import Sandbox, SandboxPreset
+from bespokelabs.sandbox import Sandbox, SandboxPreset, _metrics
 from bespokelabs.sandbox.exceptions import (
     ErrorCode,
     ErrorOutcome,
     SandboxConfigurationError,
     SandboxCreationError,
+    SandboxError,
     SandboxTimeoutError,
 )
 from bespokelabs.sandbox.types import SandboxConfig
@@ -27,9 +35,13 @@ except ImportError:  # pragma: no cover - exercised only without the extra
     _HAS_DAYTONA = False
 
 if _HAS_DAYTONA:
+    from bespokelabs.sandbox.backends import daytona as daytona_backend
     from bespokelabs.sandbox.backends.daytona import (
         _CREATE_TOKEN_LABEL,
+        IDLE_GAP_METRIC,
+        MAX_IDLE_GAP_METRIC,
         DaytonaClient,
+        DaytonaSession,
         _build_params,
         _classify_daytona_error,
         _CleanupReport,
@@ -644,6 +656,518 @@ class DaytonaLifecycleDefaultsTests(unittest.TestCase):
         self.assertEqual(params.auto_stop_interval, 240)
         self.assertEqual(params.auto_delete_interval, 60)
         self.assertEqual(params.ttl_minutes, 24 * 60)
+
+
+class _SlowSandbox:
+    """A sandbox whose exec blocks until released, counting keepalives."""
+
+    def __init__(self, *, refresh_error: Exception | None = None) -> None:
+        self.id = "sbx-slow"
+        self.cpu = 2
+        self.memory = 4
+        self.gpu = 0
+        self.labels = {"example-pipeline-label": "example-pipeline"}
+        self.refresh_calls: list[float | None] = []
+        self.refresh_error = refresh_error
+        self.release = threading.Event()
+        self.exec_error: Exception | None = None
+        sandbox = self
+
+        class _Process:
+
+            def exec(self, command, cwd=None):
+                assert sandbox.release.wait(5), "exec never released"
+                if sandbox.exec_error is not None:
+                    raise sandbox.exec_error
+                return _FakeResponse()
+
+            def code_run(self, code):
+                return self.exec(code)
+
+        self.process = _Process()
+
+    def refresh_activity(self, request_timeout: float | None = None) -> None:
+        self.refresh_calls.append(request_timeout)
+        if self.refresh_error is not None:
+            raise self.refresh_error
+
+
+class _RecordingSink:
+
+    def __init__(self) -> None:
+        self.points: list[tuple[str, float, dict]] = []
+
+    def __call__(self, name, value, tags) -> None:
+        self.points.append((name, value, dict(tags)))
+
+    def named(self, name: str) -> list[tuple[str, float, dict]]:
+        return [p for p in self.points if p[0] == name]
+
+
+def _wait_for(predicate, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() > deadline:
+            raise AssertionError("condition never held")
+        time.sleep(0.01)
+
+
+@unittest.skipUnless(_HAS_DAYTONA, "Daytona SDK not installed")
+class DaytonaKeepaliveTests(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.sink = _RecordingSink()
+        _metrics.set_metrics_sink(self.sink)
+        self.addCleanup(_metrics.set_metrics_sink, None)
+
+    def _run_exec(self, session, sandbox) -> threading.Thread:
+        result: dict = {}
+
+        def run() -> None:
+            try:
+                result["value"] = session.execute_command("sleep 600")
+            except Exception as exc:  # noqa: BLE001 - asserted by the test
+                result["error"] = exc
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.result = result
+        thread.start()
+        return thread
+
+    def test_pinned_sdk_has_refresh_activity(self) -> None:
+        from daytona import Sandbox as DaytonaSandbox
+
+        self.assertTrue(callable(DaytonaSandbox.refresh_activity))
+
+    def test_heartbeat_runs_during_a_long_call_and_stops_after(self) -> None:
+        sandbox = _SlowSandbox()
+        session = DaytonaSession(
+            client=object(), sandbox=sandbox, keepalive_secs=0.02
+        )
+        thread = self._run_exec(session, sandbox)
+        _wait_for(lambda: len(sandbox.refresh_calls) >= 3)
+        sandbox.release.set()
+        thread.join(5)
+        self.assertEqual(thread.result["value"].exit_code, 0)
+        self.assertEqual(
+            sandbox.refresh_calls[0],
+            daytona_backend._KEEPALIVE_REQUEST_TIMEOUT_SECS,
+        )
+        stopped_at = len(sandbox.refresh_calls)
+        time.sleep(0.1)
+        self.assertEqual(len(sandbox.refresh_calls), stopped_at)
+        self.assertFalse(
+            any(t.name == "daytona-keepalive" for t in threading.enumerate())
+        )
+
+    def test_heartbeat_stops_when_the_call_raises(self) -> None:
+        sandbox = _SlowSandbox()
+        sandbox.exec_error = RuntimeError("boom")
+        session = DaytonaSession(
+            client=object(), sandbox=sandbox, keepalive_secs=0.02
+        )
+        thread = self._run_exec(session, sandbox)
+        _wait_for(lambda: len(sandbox.refresh_calls) >= 1)
+        sandbox.release.set()
+        thread.join(5)
+        self.assertIn("error", thread.result)
+        stopped_at = len(sandbox.refresh_calls)
+        time.sleep(0.1)
+        self.assertEqual(len(sandbox.refresh_calls), stopped_at)
+
+    def test_heartbeat_failure_does_not_break_the_exec(self) -> None:
+        sandbox = _SlowSandbox(refresh_error=ConnectionError("down"))
+        session = DaytonaSession(
+            client=object(), sandbox=sandbox, keepalive_secs=0.01
+        )
+        with self.assertLogs(daytona_backend.logger, "WARNING") as logs:
+            thread = self._run_exec(session, sandbox)
+            _wait_for(
+                lambda: len(sandbox.refresh_calls)
+                >= daytona_backend._KEEPALIVE_MAX_CONSECUTIVE_FAILURES
+            )
+            time.sleep(0.1)
+            sandbox.release.set()
+            thread.join(5)
+        self.assertEqual(thread.result["value"].exit_code, 0)
+        # Bounded: it gives up after a few failures in a row.
+        self.assertEqual(
+            len(sandbox.refresh_calls),
+            daytona_backend._KEEPALIVE_MAX_CONSECUTIVE_FAILURES,
+        )
+        self.assertTrue(any("giving up" in line for line in logs.output))
+
+    def test_zero_interval_disables_the_heartbeat(self) -> None:
+        sandbox = _SlowSandbox()
+        sandbox.release.set()
+        session = DaytonaSession(
+            client=object(), sandbox=sandbox, keepalive_secs=0
+        )
+        session.execute_command("true")
+        self.assertEqual(sandbox.refresh_calls, [])
+
+    def test_interval_is_configurable(self) -> None:
+        self.assertEqual(
+            DaytonaSession(
+                client=object(), sandbox=_SlowSandbox()
+            )._keepalive_secs,
+            300,
+        )
+        with mock.patch.dict(
+            os.environ, {daytona_backend._KEEPALIVE_ENV: "60"}
+        ):
+            self.assertEqual(
+                DaytonaSession(
+                    client=object(), sandbox=_SlowSandbox()
+                )._keepalive_secs,
+                60,
+            )
+        fake = _FakeDaytona()
+        session = _client(fake).create(
+            SandboxConfig(
+                backend="daytona",
+                backend_options={"keepalive_interval_secs": 120},
+            )
+        )
+        self.assertEqual(session._keepalive_secs, 120)
+        # Consumed here, never sent to Daytona, and carried across resume.
+        params, _ = fake.created[0]
+        self.assertNotIn("keepalive_interval_secs", params.model_fields_set)
+        self.assertEqual(
+            session.session_state()["keepalive_interval_secs"], 120
+        )
+        with self.assertRaises(SandboxConfigurationError):
+            _client(_FakeDaytona()).create(
+                SandboxConfig(
+                    backend="daytona",
+                    backend_options={"keepalive_interval_secs": -1},
+                )
+            )
+
+    def test_env_interval_is_carried_across_resume(self) -> None:
+        fake = _FakeDaytona()
+        with mock.patch.dict(
+            os.environ, {daytona_backend._KEEPALIVE_ENV: "60"}
+        ):
+            state = (
+                _client(fake)
+                .create(SandboxConfig(backend="daytona", snapshot_id="snap"))
+                .session_state()
+            )
+        self.assertEqual(state["keepalive_interval_secs"], 60)
+        fake.get = lambda sandbox_id: fake.live[0]  # noqa: E731 - stand in for Daytona.get
+        with mock.patch.dict(
+            os.environ, {daytona_backend._KEEPALIVE_ENV: "900"}
+        ):
+            resumed = _client(fake).resume(state)
+        self.assertEqual(resumed._keepalive_secs, 60)
+
+
+@unittest.skipUnless(_HAS_DAYTONA, "Daytona SDK not installed")
+class DaytonaIdleGapMetricTests(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.sink = _RecordingSink()
+        _metrics.set_metrics_sink(self.sink)
+        self.addCleanup(_metrics.set_metrics_sink, None)
+        self.clock = [1000.0]
+        patcher = mock.patch.object(
+            daytona_backend.time, "monotonic", lambda: self.clock[0]
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        # The tag env vars must come only from the test that sets them.
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k
+            not in (
+                daytona_backend._CALLER_ENV,
+                daytona_backend._METRIC_TAG_LABELS_ENV,
+            )
+        }
+        env_patcher = mock.patch.dict(os.environ, env, clear=True)
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
+
+    def _session(self, **kwargs) -> DaytonaSession:
+        sandbox = _SlowSandbox()
+        sandbox.release.set()
+        return DaytonaSession(
+            client=_FakeDaytona(), sandbox=sandbox, keepalive_secs=0, **kwargs
+        )
+
+    def test_gap_math_and_per_sandbox_max(self) -> None:
+        session = self._session()
+        self.clock[0] += 30  # 30s from session start to the first call
+        session.execute_command("a")
+        self.clock[0] += 400  # the longest gap
+        session.execute_command("b")
+        self.clock[0] += 10
+        session.execute_command("c")
+        self.clock[0] += 50  # trailing idle before destroy counts too
+        session._client.live.append(session._sandbox)
+        session.destroy()
+
+        gaps = [v for _, v, _ in self.sink.named(IDLE_GAP_METRIC)]
+        self.assertEqual(gaps, [30, 400, 10])
+        (max_point,) = self.sink.named(MAX_IDLE_GAP_METRIC)
+        self.assertEqual(max_point[1], 400)
+        # No label is read as a tag unless a mapping is configured.
+        self.assertEqual(
+            max_point[2],
+            {"backend": "daytona", "sandbox_class": "cpu2-mem4g"},
+        )
+        self.assertEqual(
+            self.sink.named(IDLE_GAP_METRIC)[0][2]["op"], "execute_command"
+        )
+
+    def test_gap_is_measured_from_the_end_of_the_previous_call(self) -> None:
+        session = self._session()
+        sandbox = session._sandbox
+        clock = self.clock
+
+        class _TimedProcess:
+
+            def exec(self, command, cwd=None):
+                clock[0] += 3600  # a one-hour blocking call
+                return _FakeResponse()
+
+        sandbox.process = _TimedProcess()
+        session.execute_command("long")
+        clock[0] += 5
+        session.execute_command("next")
+        gaps = [v for _, v, _ in self.sink.named(IDLE_GAP_METRIC)]
+        self.assertEqual(gaps, [0, 5])
+
+    def test_max_is_emitted_once_and_tags_are_overridable(self) -> None:
+        with mock.patch.dict(
+            os.environ, {daytona_backend._CALLER_ENV: "example-caller"}
+        ):
+            session = self._session(
+                metric_tags={"pipeline": "override"},
+                metric_tag_labels={"pipeline": "example-pipeline-label"},
+            )
+        session._client.live.append(session._sandbox)
+        session.destroy()
+        session.destroy()
+        (point,) = self.sink.named(MAX_IDLE_GAP_METRIC)
+        self.assertEqual(point[2]["caller"], "example-caller")
+        self.assertEqual(point[2]["pipeline"], "override")
+
+    def test_label_mapping_from_backend_options(self) -> None:
+        fake = _FakeDaytona()
+        session = _client(fake).create(
+            SandboxConfig(
+                backend="daytona",
+                snapshot_id="snap",
+                backend_options={
+                    "labels": {
+                        "example-pipeline-label": "example-pipeline",
+                        "example-caller-label": "example-caller",
+                    },
+                    "metric_tag_labels": {
+                        "pipeline": "example-pipeline-label",
+                        "caller": "example-caller-label",
+                        "team": "absent-label",
+                    },
+                },
+            )
+        )
+        # Consumed here, never sent to Daytona.
+        params, _ = fake.created[0]
+        self.assertNotIn("metric_tag_labels", params.model_fields_set)
+        self.assertEqual(session._tags["pipeline"], "example-pipeline")
+        self.assertEqual(session._tags["caller"], "example-caller")
+        # A mapped label the sandbox does not carry adds no tag.
+        self.assertNotIn("team", session._tags)
+        self.assertEqual(
+            session.session_state()["metric_tag_labels"],
+            {
+                "pipeline": "example-pipeline-label",
+                "caller": "example-caller-label",
+                "team": "absent-label",
+            },
+        )
+
+    def test_label_mapping_from_env_and_carried_across_resume(self) -> None:
+        fake = _FakeDaytona()
+        config = SandboxConfig(
+            backend="daytona",
+            snapshot_id="snap",
+            backend_options={
+                "labels": {
+                    "label-a": "example-pipeline",
+                    "label-b": "example-caller",
+                }
+            },
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                daytona_backend._METRIC_TAG_LABELS_ENV: (
+                    " pipeline=label-a, caller=label-b,bogus,=x,"
+                )
+            },
+        ):
+            with self.assertLogs(daytona_backend.logger, "WARNING"):
+                session = _client(fake).create(config)
+        self.assertEqual(session._tags["pipeline"], "example-pipeline")
+        self.assertEqual(session._tags["caller"], "example-caller")
+        state = session.session_state()
+        self.assertEqual(
+            state["metric_tag_labels"],
+            {"pipeline": "label-a", "caller": "label-b"},
+        )
+        # Resumed with no env var set, the session keeps the mapping.
+        fake.get = lambda sandbox_id: fake.live[0]  # noqa: E731
+        resumed = _client(fake).resume(state)
+        self.assertEqual(resumed._tags["pipeline"], "example-pipeline")
+
+    def test_caller_label_wins_over_caller_env(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                daytona_backend._CALLER_ENV: "from-env",
+                daytona_backend._METRIC_TAG_LABELS_ENV: (
+                    "caller=example-pipeline-label"
+                ),
+            },
+        ):
+            session = self._session()
+        self.assertEqual(session._tags["caller"], "example-pipeline")
+
+    def test_bad_label_mapping_is_a_config_error(self) -> None:
+        for bad in ("pipeline=label-a", {"pipeline": 3}, {"": "label"}):
+            with self.subTest(bad=bad):
+                with self.assertRaises(SandboxConfigurationError):
+                    _client(_FakeDaytona()).create(
+                        SandboxConfig(
+                            backend="daytona",
+                            backend_options={"metric_tag_labels": bad},
+                        )
+                    )
+
+    def test_points_are_emitted_after_the_call_and_the_delete(self) -> None:
+        order: list[str] = []
+        session = self._session()
+        sandbox = session._sandbox
+
+        class _Process:
+
+            def exec(self, command, cwd=None):
+                order.append("exec")
+                return _FakeResponse()
+
+        sandbox.process = _Process()
+        real_delete = session._client.delete
+
+        def delete(sb) -> None:
+            order.append("delete")
+            real_delete(sb)
+
+        session._client.delete = delete
+        session._client.live.append(sandbox)
+        _metrics.set_metrics_sink(lambda name, *_: order.append(name))
+        session.execute_command("a")
+        session.destroy()
+        self.assertEqual(
+            order, ["exec", IDLE_GAP_METRIC, "delete", MAX_IDLE_GAP_METRIC]
+        )
+
+    def test_max_is_emitted_even_when_delete_fails(self) -> None:
+        session = self._session()
+
+        def delete(sb) -> None:
+            raise RuntimeError("delete unavailable")
+
+        session._client.delete = delete
+        with self.assertRaises(SandboxError):
+            session.destroy()
+        self.assertEqual(len(self.sink.named(MAX_IDLE_GAP_METRIC)), 1)
+
+    def test_structured_log_line_is_written(self) -> None:
+        session = self._session()
+        session._client.live.append(session._sandbox)
+        with self.assertLogs(_metrics.metrics_logger, "INFO") as logs:
+            session.destroy()
+        self.assertIn(MAX_IDLE_GAP_METRIC, logs.output[0])
+        self.assertIn('"sandbox_class": "cpu2-mem4g"', logs.output[0])
+
+
+class MetricsSinkTests(unittest.TestCase):
+
+    def setUp(self) -> None:
+        _metrics.set_metrics_sink(None)
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith(("DD_AGENT", "DD_DOGSTATSD", "DD_ENV"))
+        }
+        patcher = mock.patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_no_op_without_a_sink(self) -> None:
+        with mock.patch.object(_metrics.socket, "socket") as make_socket:
+            with self.assertLogs(_metrics.metrics_logger, "INFO"):
+                _metrics.emit("x.y", 1.0, {"a": "b"})
+        make_socket.assert_not_called()
+
+    def test_dogstatsd_over_unix_socket(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "dsd.socket")
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+            server.bind(path)
+            self.addCleanup(server.close)
+            with mock.patch.dict(
+                os.environ,
+                {"DD_DOGSTATSD_SOCKET": path, "DD_ENV": "production"},
+            ):
+                _metrics.emit(
+                    "bespokelabs.sandbox.idle_gap_seconds",
+                    12.5,
+                    {"backend": "daytona"},
+                    log_level=logging.DEBUG,
+                )
+            server.settimeout(2)
+            self.assertEqual(
+                server.recv(1024),
+                b"bespokelabs.sandbox.idle_gap_seconds:12.5|d"
+                b"|#backend:daytona,env:production",
+            )
+
+    def test_dogstatsd_setup_is_retried_after_a_failure(self) -> None:
+        clock = [1000.0]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "dsd.socket")
+            with (
+                mock.patch.dict(os.environ, {"DD_DOGSTATSD_SOCKET": path}),
+                mock.patch.object(_metrics.time, "monotonic", lambda: clock[0]),
+            ):
+                self.addCleanup(setattr, _metrics, "_statsd", None)
+                # No agent yet: setup fails and is not retried right away.
+                _metrics.emit("x.y", 1.0, {}, log_level=logging.DEBUG)
+                server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+                server.bind(path)
+                self.addCleanup(server.close)
+                server.settimeout(0.2)
+                _metrics.emit("x.y", 2.0, {}, log_level=logging.DEBUG)
+                with self.assertRaises(socket.timeout):
+                    server.recv(1024)
+                # After the retry window it reconnects and sends.
+                clock[0] += _metrics._RETRY_SECS + 1
+                _metrics.emit("x.y", 3.0, {}, log_level=logging.DEBUG)
+                server.settimeout(2)
+                self.assertEqual(server.recv(1024), b"x.y:3|d")
+
+    def test_a_failing_sink_never_raises(self) -> None:
+        def broken(name, value, tags):
+            raise RuntimeError("sink down")
+
+        _metrics.set_metrics_sink(broken)
+        self.addCleanup(_metrics.set_metrics_sink, None)
+        _metrics.emit("x.y", 1.0, {})
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ Usage:
         print(result.stdout)
 """
 
+from bespokelabs.sandbox._metrics import set_metrics_sink
 from bespokelabs.sandbox._transfer import build_files_map
 from bespokelabs.sandbox.agents import (
     AgentCapability,
@@ -72,6 +73,7 @@ from bespokelabs.sandbox.workspace import (
 )
 
 __all__ = [
+    "set_metrics_sink",
     "Sandbox",
     "SandboxClient",
     "RemoteSandbox",
