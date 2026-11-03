@@ -259,6 +259,34 @@ class SandboxSessionState:
         return cls(backend=obj["backend"], data=obj["data"])
 
 
+@dataclass(frozen=True)
+class SandboxListing:
+    """One running sandbox that a provider listed by its labels.
+
+    Returned by ``SandboxClient.list_sandboxes``.  ``labels`` are the
+    sandbox's own labels (Daytona) or tags (Modal).  ``state`` is the
+    provider's raw state string when it reports one.  ``created_at`` is a
+    timezone-aware time when the provider reports it, else ``None`` (Modal's
+    listing carries none).  ``labels_complete`` is ``False`` when the SDK
+    cannot read the tags back (Modal before ``get_tags``): ``labels`` is then
+    only the filter the provider matched, not every tag the sandbox has.
+    ``session_state`` is what ``SandboxClient.resume`` takes to reattach to
+    the sandbox.  Daytona also lists stopped and archived sandboxes: their
+    ``state`` says so, and a reattached session to one can be destroyed but
+    cannot run commands until the sandbox is started again.
+    """
+
+    provider_resource_id: str
+    labels: dict[str, str]
+    state: str | None
+    created_at: datetime | None
+    session_state: SandboxSessionState
+    labels_complete: bool = True
+
+    # Its labels are a dict, so a generated hash would raise on use: unhashable by intent.
+    __hash__ = None  # type: ignore[assignment]
+
+
 # -- Jobs ----------------------------------------------------------------------
 
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")

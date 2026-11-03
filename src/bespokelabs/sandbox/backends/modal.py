@@ -17,7 +17,9 @@ from bespokelabs.sandbox.types import (
     FileInfo,
     NetworkPolicy,
     SandboxConfig,
+    SandboxListing,
     SandboxResult,
+    SandboxSessionState,
     SnapshotInfo,
 )
 
@@ -93,6 +95,56 @@ class ModalClient:
             ) from exc
 
         return ModalSession(sandbox=sandbox)
+
+    def list_sandboxes(self, labels: dict[str, str]) -> list[SandboxListing]:
+        """Every running sandbox whose tags include all of *labels*.
+
+        Modal filters on tags server-side and lists running sandboxes only;
+        its listing carries no creation time, so ``created_at`` is ``None``.
+        Where the SDK can read a sandbox's tags back (``get_tags``), one whose
+        own tags do not match is dropped rather than trusted; an older SDK's
+        server-side match is reported with ``labels_complete=False``.  Any failure raises instead of
+        returning part of the list.
+        """
+        try:
+            found = list(self._modal.Sandbox.list(tags=dict(labels)))
+            listings: list[SandboxListing] = []
+            for sandbox in found:
+                sandbox_id = getattr(sandbox, "object_id", None)
+                if not sandbox_id:
+                    raise SandboxExecutionError(
+                        "Modal listed a sandbox without an id.",
+                        backend="modal",
+                        op="list",
+                    )
+                get_tags = getattr(sandbox, "get_tags", None)
+                # An SDK without get_tags() (older than tag read-back) leaves only the
+                # server-side filter, which matched every requested tag; the listing says
+                # its labels are that filter, not the sandbox's whole tag set.
+                complete = callable(get_tags)
+                tags = get_tags() if complete else labels
+                own = {str(key): str(value) for key, value in (tags or {}).items()}
+                if any(own.get(key) != value for key, value in labels.items()):
+                    continue
+                listings.append(
+                    SandboxListing(
+                        provider_resource_id=str(sandbox_id),
+                        labels=own,
+                        state="running",
+                        created_at=None,
+                        session_state=SandboxSessionState(
+                            backend="modal", data={"sandbox_id": str(sandbox_id)}
+                        ),
+                        labels_complete=complete,
+                    )
+                )
+        except SandboxExecutionError:
+            raise
+        except Exception as exc:
+            raise SandboxExecutionError(
+                f"Modal list failed: {exc}", backend="modal", op="list"
+            ) from exc
+        return listings
 
     def resume(self, data: dict) -> ModalSession:
         try:

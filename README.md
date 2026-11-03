@@ -1204,6 +1204,28 @@ destroying either affects the other.
 | Local, Safehouse | host workdir | `workdir`, env overlay |
 | Ray | — (not supported) | raises `FeatureNotSupportedError` |
 
+### Listing sandboxes by label
+
+`SandboxClient.list_sandboxes(labels)` returns the sandboxes that carry *all*
+of the given labels, on Daytona (resource labels) and Modal (sandbox tags).
+Each `SandboxListing` has the provider id, the sandbox's own labels, the raw
+provider state, the creation time when the provider reports one (`None` on
+Modal), and a `session_state` to pass to `resume()`, for example to destroy a
+sandbox nobody owns any more:
+
+```python
+client = SandboxClient("daytona")
+for found in client.list_sandboxes({"team": "research", "run": "42"}):
+    client.resume(found.session_state).destroy()
+```
+
+At least one non-empty label is required, so an unfiltered listing is
+refused. A provider failure raises; a partial list is never returned. Daytona
+lists sandboxes in any state (a stopped one's session can be destroyed, not run
+in, until it is started); Modal lists running ones only. On a Modal SDK that
+cannot read tags back, `labels` is only the matched filter and
+`labels_complete` is `False`. Other backends raise `FeatureNotSupportedError`.
+
 ### Detached jobs (Google Cloud Batch)
 
 A job runs one command to completion without the submitting process staying

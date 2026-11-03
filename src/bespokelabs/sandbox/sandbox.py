@@ -8,7 +8,7 @@ import re
 import shlex
 import time
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, TypeVar, overload
 
@@ -53,6 +53,7 @@ from bespokelabs.sandbox.types import (
     JobStatus,
     NetworkPolicy,
     SandboxConfig,
+    SandboxListing,
     SandboxResult,
     SandboxSessionState,
     SnapshotInfo,
@@ -879,6 +880,33 @@ class SandboxClient:
         return Sandbox._resume_with(
             self._backend_name, self._backend_client, state
         )
+
+    def list_sandboxes(self, labels: Mapping[str, str]) -> list[SandboxListing]:
+        """List this backend's running sandboxes that carry all of *labels*.
+
+        Supported on ``daytona`` (resource labels) and ``modal`` (sandbox
+        tags); every other backend raises :class:`FeatureNotSupportedError`.
+        *labels* must name at least one non-empty label: an unfiltered
+        listing is refused, so a caller can never act on sandboxes it did
+        not mark.  Provider failures raise; a partial list is never
+        returned.  Pass a listing's ``session_state`` to :meth:`resume` to
+        act on that sandbox.
+        """
+        wanted = {str(k): str(v) for k, v in dict(labels or {}).items()}
+        if not wanted or any(not k or not v for k, v in wanted.items()):
+            raise SandboxConfigurationError(
+                "list_sandboxes needs at least one non-empty label to filter by",
+                backend=self._backend_name,
+                op="list",
+            )
+        lister = getattr(type(self._backend_client), "list_sandboxes", None)
+        if not callable(lister):
+            raise FeatureNotSupportedError(
+                f"The '{self._backend_name}' backend cannot list sandboxes by label",
+                backend=self._backend_name,
+                op="list",
+            )
+        return self._backend_client.list_sandboxes(wanted)
 
     # -- Jobs --------------------------------------------------------------
 
