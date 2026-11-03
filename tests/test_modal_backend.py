@@ -5,6 +5,11 @@ from unittest import mock
 
 from bespokelabs.sandbox import Sandbox, SandboxClient
 from bespokelabs.sandbox.backends.modal import ModalClient
+from bespokelabs.sandbox.exceptions import (
+    FeatureNotSupportedError,
+    SandboxConfigurationError,
+    SandboxExecutionError,
+)
 from bespokelabs.sandbox.types import SandboxConfig
 
 
@@ -89,3 +94,63 @@ class ModalGpuPublicApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ModalListSandboxesTests(unittest.TestCase):
+    """list_sandboxes finds running sandboxes by tag and never guesses."""
+
+    def _client(self, *sandboxes: mock.MagicMock) -> tuple[ModalClient, mock.MagicMock]:
+        modal = mock.MagicMock()
+        modal.Sandbox.list.return_value = iter(sandboxes)
+        client = object.__new__(ModalClient)
+        client._modal = modal
+        return client, modal
+
+    @staticmethod
+    def _sandbox(object_id: str, tags: dict[str, str]) -> mock.MagicMock:
+        sandbox = mock.MagicMock(object_id=object_id)
+        sandbox.get_tags.return_value = tags
+        return sandbox
+
+    def test_lists_running_sandboxes_by_tag(self) -> None:
+        client, modal = self._client(self._sandbox("sb-1", {"team": "x", "run": "1"}))
+
+        (only,) = client.list_sandboxes({"team": "x"})
+
+        modal.Sandbox.list.assert_called_once_with(tags={"team": "x"})
+        self.assertEqual(only.provider_resource_id, "sb-1")
+        self.assertEqual(only.labels, {"team": "x", "run": "1"})
+        self.assertIsNone(only.created_at)
+        self.assertEqual(only.session_state.backend, "modal")
+        self.assertEqual(only.session_state.data, {"sandbox_id": "sb-1"})
+
+    def test_a_sandbox_whose_own_tags_do_not_match_is_dropped(self) -> None:
+        client, _ = self._client(self._sandbox("sb-2", {"team": "y"}))
+
+        self.assertEqual(client.list_sandboxes({"team": "x"}), [])
+
+    def test_a_failed_tag_read_raises_instead_of_returning_part_of_the_list(self) -> None:
+        broken = self._sandbox("sb-3", {})
+        broken.get_tags.side_effect = RuntimeError("gone")
+        client, _ = self._client(self._sandbox("sb-1", {"team": "x"}), broken)
+
+        with self.assertRaises(SandboxExecutionError):
+            client.list_sandboxes({"team": "x"})
+
+
+class SandboxClientListSandboxesTests(unittest.TestCase):
+
+    def test_an_unfiltered_listing_is_refused(self) -> None:
+        client = object.__new__(SandboxClient)
+        client._backend_name = "modal"
+        client._backend_client = mock.MagicMock()
+        for labels in ({}, {"team": ""}):
+            with self.assertRaises(SandboxConfigurationError):
+                client.list_sandboxes(labels)
+        client._backend_client.list_sandboxes.assert_not_called()
+
+    def test_a_backend_that_cannot_list_says_so(self) -> None:
+        client = SandboxClient("local")
+
+        with self.assertRaises(FeatureNotSupportedError):
+            client.list_sandboxes({"team": "x"})

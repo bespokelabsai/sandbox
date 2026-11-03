@@ -14,6 +14,7 @@ from bespokelabs.sandbox.exceptions import (
     ErrorOutcome,
     SandboxConfigurationError,
     SandboxCreationError,
+    SandboxError,
     SandboxTimeoutError,
 )
 from bespokelabs.sandbox.types import SandboxConfig
@@ -542,3 +543,56 @@ class TimeoutSecsExplicitnessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(_HAS_DAYTONA, "Daytona SDK not installed")
+class DaytonaListSandboxesTests(unittest.TestCase):
+    """list_sandboxes finds a caller's sandboxes by label and never guesses."""
+
+    def _fake_with(self, *sandboxes: _FakeSandbox) -> _FakeDaytona:
+        fake = _FakeDaytona()
+        fake.live.extend(sandboxes)
+        return fake
+
+    def test_lists_only_sandboxes_carrying_every_label(self) -> None:
+        mine = _FakeSandbox("sbx-a", {"team": "x", "run": "1"})
+        mine.state = "started"
+        mine.created_at = "2026-01-02T03:04:05Z"
+        other = _FakeSandbox("sbx-b", {"team": "x", "run": "2"})
+        fake = self._fake_with(mine, other)
+
+        listed = _client(fake).list_sandboxes({"team": "x", "run": "1"})
+
+        self.assertEqual([s.provider_resource_id for s in listed], ["sbx-a"])
+        self.assertEqual(fake.list_queries[0].labels, {"team": "x", "run": "1"})
+        only = listed[0]
+        self.assertEqual(only.labels, {"team": "x", "run": "1"})
+        self.assertEqual(only.state, "started")
+        self.assertEqual(only.created_at.isoformat(), "2026-01-02T03:04:05+00:00")
+        self.assertEqual(only.session_state.backend, "daytona")
+        self.assertEqual(only.session_state.data, {"sandbox_id": "sbx-a"})
+
+    def test_a_sandbox_whose_own_labels_do_not_match_is_dropped(self) -> None:
+        class _LooseFilter(_FakeDaytona):
+            def list(self, query=None, request_timeout=None):
+                self.list_queries.append(query)
+                return iter(self.live)   # a server that ignored the filter
+
+        fake = _LooseFilter()
+        fake.live.append(_FakeSandbox("sbx-stray", {"team": "y"}))
+
+        self.assertEqual(_client(fake).list_sandboxes({"team": "x"}), [])
+
+    def test_a_failed_listing_raises_instead_of_returning_nothing(self) -> None:
+        fake = _FakeDaytona(list_error=ConnectionError("reset"))
+
+        with self.assertRaises(SandboxError):
+            _client(fake).list_sandboxes({"team": "x"})
+
+    def test_an_unknown_creation_time_is_none(self) -> None:
+        fake = self._fake_with(_FakeSandbox("sbx-a", {"team": "x"}))
+
+        (only,) = _client(fake).list_sandboxes({"team": "x"})
+
+        self.assertIsNone(only.created_at)
+        self.assertIsNone(only.state)

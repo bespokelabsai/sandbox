@@ -9,6 +9,7 @@ from bespokelabs.sandbox.types import (
     JobSpec,
     JobStatus,
     SandboxConfig,
+    SandboxListing,
     SandboxResult,
     SnapshotInfo,
 )
@@ -101,4 +102,18 @@ class SandboxJobBackend(Protocol):
         ...
 
     def cancel_job(self, job_id: str) -> JobStatus:
+        ...
+
+
+@runtime_checkable
+class SandboxListingBackend(Protocol):
+    """A backend client that can list its running sandboxes by label.
+
+    ``list_sandboxes`` returns every running sandbox carrying *all* of the
+    given labels, across every page the provider returns, or raises: a
+    partial list is never returned.  ``SandboxClient.list_sandboxes`` raises
+    ``FeatureNotSupportedError`` on a backend client without it.
+    """
+
+    def list_sandboxes(self, labels: dict[str, str]) -> list[SandboxListing]:
         ...

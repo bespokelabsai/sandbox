@@ -11,6 +11,7 @@ import shlex
 import threading
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
@@ -30,7 +31,9 @@ from bespokelabs.sandbox.types import (
     FileInfo,
     NetworkPolicy,
     SandboxConfig,
+    SandboxListing,
     SandboxResult,
+    SandboxSessionState,
     SnapshotInfo,
 )
 
@@ -198,6 +201,60 @@ class DaytonaClient:
             client=client, sandbox=sandbox, workdir=data.get("workdir")
         )
 
+    def list_sandboxes(self, labels: dict[str, str]) -> list[SandboxListing]:
+        """Every sandbox, in any state, that carries all of *labels*.
+
+        Daytona filters on labels server-side and the SDK's ``list()`` pages
+        through every result.  A sandbox whose own labels do not match is
+        dropped rather than trusted, and any failure raises instead of
+        returning part of the list.
+        """
+        client = self._ensure_client()
+        try:
+            from daytona import (
+                ListSandboxesQuery,  # type: ignore[import-untyped]
+            )
+        except ImportError as exc:
+            raise FeatureNotSupportedError(
+                "This Daytona SDK version cannot list sandboxes by label",
+                backend="daytona",
+                op="list",
+            ) from exc
+        try:
+            # list() is a generator, so materialize it inside the guard.
+            found = list(client.list(ListSandboxesQuery(labels=dict(labels))))
+        except Exception as exc:
+            raise _classify_daytona_error(exc, op="list") from exc
+        listings: list[SandboxListing] = []
+        for sandbox in found:
+            sandbox_id = getattr(sandbox, "id", None)
+            if not sandbox_id:
+                raise SandboxExecutionError(
+                    "Daytona listed a sandbox without an id.",
+                    backend="daytona",
+                    op="list",
+                )
+            own = {
+                str(key): str(value)
+                for key, value in (getattr(sandbox, "labels", None) or {}).items()
+            }
+            if any(own.get(key) != value for key, value in labels.items()):
+                continue
+            state = getattr(sandbox, "state", None)
+            state = getattr(state, "value", state)
+            listings.append(
+                SandboxListing(
+                    provider_resource_id=str(sandbox_id),
+                    labels=own,
+                    state=None if state is None else str(state),
+                    created_at=_aware_time(getattr(sandbox, "created_at", None)),
+                    session_state=SandboxSessionState(
+                        backend="daytona", data={"sandbox_id": str(sandbox_id)}
+                    ),
+                )
+            )
+        return listings
+
     def create(self, config: SandboxConfig) -> DaytonaSession:
         self._ensure_client()
 
@@ -292,6 +349,18 @@ class DaytonaClient:
         return _CleanupReport(
             "deleted", deleted_ids[0] if len(deleted_ids) == 1 else None
         )
+
+
+def _aware_time(value: object) -> datetime | None:
+    """Return a provider timestamp as an aware datetime (naive means UTC), or None."""
+    if isinstance(value, str) and value.strip():
+        try:
+            value = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 def _create_kwargs(config: SandboxConfig) -> dict:

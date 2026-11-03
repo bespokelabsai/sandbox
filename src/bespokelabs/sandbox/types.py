@@ -259,6 +259,26 @@ class SandboxSessionState:
         return cls(backend=obj["backend"], data=obj["data"])
 
 
+@dataclass(frozen=True)
+class SandboxListing:
+    """One running sandbox that a provider listed by its labels.
+
+    Returned by ``SandboxClient.list_sandboxes``.  ``labels`` are the
+    sandbox's own labels (Daytona) or tags (Modal).  ``state`` is the
+    provider's raw state string when it reports one.  ``created_at`` is a
+    timezone-aware time when the provider reports it, else ``None`` (Modal's
+    listing carries none).  ``session_state`` is what
+    ``SandboxClient.resume`` takes to reattach to, and for example destroy,
+    the sandbox.
+    """
+
+    provider_resource_id: str
+    labels: dict[str, str]
+    state: str | None
+    created_at: datetime | None
+    session_state: SandboxSessionState
+
+
 # -- Jobs ----------------------------------------------------------------------
 
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
