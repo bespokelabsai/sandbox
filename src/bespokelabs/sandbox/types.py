@@ -267,9 +267,13 @@ class SandboxListing:
     sandbox's own labels (Daytona) or tags (Modal).  ``state`` is the
     provider's raw state string when it reports one.  ``created_at`` is a
     timezone-aware time when the provider reports it, else ``None`` (Modal's
-    listing carries none).  ``session_state`` is what
-    ``SandboxClient.resume`` takes to reattach to, and for example destroy,
-    the sandbox.
+    listing carries none).  ``labels_complete`` is ``False`` when the SDK
+    cannot read the tags back (Modal before ``get_tags``): ``labels`` is then
+    only the filter the provider matched, not every tag the sandbox has.
+    ``session_state`` is what ``SandboxClient.resume`` takes to reattach to
+    the sandbox.  Daytona also lists stopped and archived sandboxes: their
+    ``state`` says so, and a reattached session to one can be destroyed but
+    cannot run commands until the sandbox is started again.
     """
 
     provider_resource_id: str
@@ -277,6 +281,7 @@ class SandboxListing:
     state: str | None
     created_at: datetime | None
     session_state: SandboxSessionState
+    labels_complete: bool = True
 
     # Its labels are a dict, so a generated hash would raise on use: unhashable by intent.
     __hash__ = None  # type: ignore[assignment]

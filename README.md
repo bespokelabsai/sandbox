@@ -1221,8 +1221,10 @@ for found in client.list_sandboxes({"team": "research", "run": "42"}):
 
 At least one non-empty label is required, so an unfiltered listing is
 refused. A provider failure raises; a partial list is never returned. Daytona
-lists sandboxes in any state; Modal lists running ones only. Other backends
-raise `FeatureNotSupportedError`.
+lists sandboxes in any state (a stopped one's session can be destroyed, not run
+in, until it is started); Modal lists running ones only. On a Modal SDK that
+cannot read tags back, `labels` is only the matched filter and
+`labels_complete` is `False`. Other backends raise `FeatureNotSupportedError`.
 
 ### Detached jobs (Google Cloud Batch)
 

@@ -103,7 +103,7 @@ class ModalClient:
         its listing carries no creation time, so ``created_at`` is ``None``.
         Where the SDK can read a sandbox's tags back (``get_tags``), one whose
         own tags do not match is dropped rather than trusted; an older SDK's
-        server-side match is taken as its tags.  Any failure raises instead of
+        server-side match is reported with ``labels_complete=False``.  Any failure raises instead of
         returning part of the list.
         """
         try:
@@ -119,8 +119,10 @@ class ModalClient:
                     )
                 get_tags = getattr(sandbox, "get_tags", None)
                 # An SDK without get_tags() (older than tag read-back) leaves only the
-                # server-side filter, which matched every requested tag.
-                tags = get_tags() if callable(get_tags) else labels
+                # server-side filter, which matched every requested tag; the listing says
+                # its labels are that filter, not the sandbox's whole tag set.
+                complete = callable(get_tags)
+                tags = get_tags() if complete else labels
                 own = {str(key): str(value) for key, value in (tags or {}).items()}
                 if any(own.get(key) != value for key, value in labels.items()):
                     continue
@@ -133,6 +135,7 @@ class ModalClient:
                         session_state=SandboxSessionState(
                             backend="modal", data={"sandbox_id": str(sandbox_id)}
                         ),
+                        labels_complete=complete,
                     )
                 )
         except SandboxExecutionError:

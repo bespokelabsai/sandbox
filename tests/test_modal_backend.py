@@ -117,6 +117,7 @@ class ModalListSandboxesTests(unittest.TestCase):
         modal.Sandbox.list.assert_called_once_with(tags={"team": "x"})
         self.assertEqual(only.provider_resource_id, "sb-1")
         self.assertEqual(only.labels, {"team": "x", "run": "1"})
+        self.assertTrue(only.labels_complete)
         self.assertIsNone(only.created_at)
         self.assertEqual(only.session_state.backend, "modal")
         self.assertEqual(only.session_state.data, {"sandbox_id": "sb-1"})
@@ -134,6 +135,7 @@ class ModalListSandboxesTests(unittest.TestCase):
 
         self.assertEqual(only.provider_resource_id, "sb-old")
         self.assertEqual(only.labels, {"team": "x"})
+        self.assertFalse(only.labels_complete)
 
     def test_a_failed_tag_read_raises_instead_of_returning_part_of_the_list(self) -> None:
         broken = self._sandbox("sb-3", {})
