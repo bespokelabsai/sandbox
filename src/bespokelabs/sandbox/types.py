@@ -278,6 +278,9 @@ class SandboxListing:
     created_at: datetime | None
     session_state: SandboxSessionState
 
+    # Its labels are a dict, so a generated hash would raise on use: unhashable by intent.
+    __hash__ = None  # type: ignore[assignment]
+
 
 # -- Jobs ----------------------------------------------------------------------
 

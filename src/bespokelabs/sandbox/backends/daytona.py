@@ -162,7 +162,7 @@ class DaytonaClient:
         # guard the one-time authenticated client construction.
         self._connect_lock = threading.Lock()
 
-    def _ensure_client(self) -> object:
+    def _ensure_client(self, op: str = "create") -> object:
         if self._client is None:
             with self._connect_lock:
                 if self._client is None:
@@ -171,7 +171,7 @@ class DaytonaClient:
                         raise SandboxAuthenticationError(
                             "DAYTONA_API_KEY environment variable is not set",
                             backend="daytona",
-                            op="create",
+                            op=op,
                         )
                     self._client = self._daytona_cls(
                         self._daytona_config_cls(
@@ -209,7 +209,7 @@ class DaytonaClient:
         dropped rather than trusted, and any failure raises instead of
         returning part of the list.
         """
-        client = self._ensure_client()
+        client = self._ensure_client(op="list")
         try:
             from daytona import (
                 ListSandboxesQuery,  # type: ignore[import-untyped]

@@ -7,6 +7,7 @@ never create, start, stop or delete a real sandbox.
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from bespokelabs.sandbox import Sandbox, SandboxPreset
 from bespokelabs.sandbox.exceptions import (
@@ -541,9 +542,6 @@ class TimeoutSecsExplicitnessTests(unittest.TestCase):
         self.assertFalse(config.timeout_secs_explicit)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 @unittest.skipUnless(_HAS_DAYTONA, "Daytona SDK not installed")
 class DaytonaListSandboxesTests(unittest.TestCase):
@@ -589,6 +587,19 @@ class DaytonaListSandboxesTests(unittest.TestCase):
         with self.assertRaises(SandboxError):
             _client(fake).list_sandboxes({"team": "x"})
 
+    def test_a_missing_key_is_reported_as_a_list_failure(self) -> None:
+        client = DaytonaClient()
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(SandboxError) as ctx:
+                client.list_sandboxes({"team": "x"})
+        self.assertEqual(ctx.exception.op, "list")
+
+    def test_a_listing_is_unhashable_by_intent(self) -> None:
+        fake = self._fake_with(_FakeSandbox("sbx-a", {"team": "x"}))
+        (only,) = _client(fake).list_sandboxes({"team": "x"})
+        with self.assertRaises(TypeError):
+            hash(only)
+
     def test_an_unknown_creation_time_is_none(self) -> None:
         fake = self._fake_with(_FakeSandbox("sbx-a", {"team": "x"}))
 
@@ -596,3 +607,6 @@ class DaytonaListSandboxesTests(unittest.TestCase):
 
         self.assertIsNone(only.created_at)
         self.assertIsNone(only.state)
+
+if __name__ == "__main__":
+    unittest.main()

@@ -92,9 +92,6 @@ class ModalGpuPublicApiTests(unittest.TestCase):
         self.assertEqual(config.gpu, "L4")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class ModalListSandboxesTests(unittest.TestCase):
     """list_sandboxes finds running sandboxes by tag and never guesses."""
@@ -129,6 +126,15 @@ class ModalListSandboxesTests(unittest.TestCase):
 
         self.assertEqual(client.list_sandboxes({"team": "x"}), [])
 
+    def test_an_sdk_without_tag_read_back_keeps_the_server_side_match(self) -> None:
+        old = mock.MagicMock(spec=["object_id"], object_id="sb-old")
+        client, _ = self._client(old)
+
+        (only,) = client.list_sandboxes({"team": "x"})
+
+        self.assertEqual(only.provider_resource_id, "sb-old")
+        self.assertEqual(only.labels, {"team": "x"})
+
     def test_a_failed_tag_read_raises_instead_of_returning_part_of_the_list(self) -> None:
         broken = self._sandbox("sb-3", {})
         broken.get_tags.side_effect = RuntimeError("gone")
@@ -154,3 +160,6 @@ class SandboxClientListSandboxesTests(unittest.TestCase):
 
         with self.assertRaises(FeatureNotSupportedError):
             client.list_sandboxes({"team": "x"})
+
+if __name__ == "__main__":
+    unittest.main()

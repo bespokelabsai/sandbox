@@ -101,8 +101,10 @@ class ModalClient:
 
         Modal filters on tags server-side and lists running sandboxes only;
         its listing carries no creation time, so ``created_at`` is ``None``.
-        A sandbox whose own tags do not match is dropped rather than trusted,
-        and any failure raises instead of returning part of the list.
+        Where the SDK can read a sandbox's tags back (``get_tags``), one whose
+        own tags do not match is dropped rather than trusted; an older SDK's
+        server-side match is taken as its tags.  Any failure raises instead of
+        returning part of the list.
         """
         try:
             found = list(self._modal.Sandbox.list(tags=dict(labels)))
@@ -115,10 +117,11 @@ class ModalClient:
                         backend="modal",
                         op="list",
                     )
-                own = {
-                    str(key): str(value)
-                    for key, value in (sandbox.get_tags() or {}).items()
-                }
+                get_tags = getattr(sandbox, "get_tags", None)
+                # An SDK without get_tags() (older than tag read-back) leaves only the
+                # server-side filter, which matched every requested tag.
+                tags = get_tags() if callable(get_tags) else labels
+                own = {str(key): str(value) for key, value in (tags or {}).items()}
                 if any(own.get(key) != value for key, value in labels.items()):
                     continue
                 listings.append(
