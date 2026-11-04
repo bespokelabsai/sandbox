@@ -41,9 +41,9 @@ invalidates all existing keys and sessions.
 
 Install only the extras for enabled providers. Configure provider credentials
 on the server (`DAYTONA_API_KEY`, `E2B_API_KEY`, `MODAL_TOKEN_ID` plus
-`MODAL_TOKEN_SECRET`, `RUNPOD_API_KEY`, or `TENSORLAKE_API_KEY`). Credential
-values remain in process memory and are neither persisted nor returned by the
-API. A configured provider is `unchecked` until a deployment-supplied checker
+`MODAL_TOKEN_SECRET`, `RUNPOD_API_KEY`, `TENSORLAKE_API_KEY`, or
+`BOXD_API_KEY`). Credential values remain in process memory and are neither
+persisted nor returned by the API. A configured provider is `unchecked` until a deployment-supplied checker
 runs; it is `healthy` only after a successful check.
 
 Before enabling a provider, verify create, execute, terminate, not-found

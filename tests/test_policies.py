@@ -891,7 +891,11 @@ class RoleAndProviderAPITest(unittest.TestCase):
         principal = store.authenticate(key.secret)
 
         checked = service.check_provider_health(principal, "daytona")
-        listed = service.provider_summary(principal)[0]
+        listed = next(
+            item
+            for item in service.provider_summary(principal)
+            if item["backend"] == "daytona"
+        )
 
         self.assertTrue(checked["configured"])
         self.assertEqual(checked["status"], "unchecked")

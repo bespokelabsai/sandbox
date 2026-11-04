@@ -105,6 +105,7 @@ register_preset(
                 "npm install -g opencode-ai",
             ],
             "tensorlake": [_tensorlake_npm_install("opencode-ai")],
+            "boxd": ["opencode --version"],
         },
         memory_mb=2048,
         timeout_secs=1800,
@@ -124,6 +125,7 @@ register_preset(
             "tensorlake": [
                 _tensorlake_npm_install("@anthropic-ai/claude-code"),
             ],
+            "boxd": ["claude --version"],
         },
         memory_mb=2048,
         timeout_secs=1800,
@@ -142,6 +144,7 @@ register_preset(
             "tensorlake": [
                 _tensorlake_npm_install("@openai/codex"),
             ],
+            "boxd": ["codex --version"],
         },
         memory_mb=2048,
         timeout_secs=1800,
@@ -162,6 +165,7 @@ register_preset(
                     "@anthropic-ai/claude-code @openai/codex"
                 ),
             ],
+            "boxd": ["claude --version", "codex --version"],
         },
         memory_mb=2048,
         timeout_secs=1800,
