@@ -343,7 +343,7 @@ class BoxdClient:
             name=machine.name,
             domain=_machine_domain(machine),
             workdir=data.get("workdir"),
-            env_vars=dict(data.get("env_vars") or {}),
+            env_vars=_check_env(dict(data.get("env_vars") or {})),
             org=data.get("org"),
             snapshot_timeout_secs=float(
                 data.get(
