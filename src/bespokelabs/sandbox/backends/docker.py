@@ -8,6 +8,7 @@ import pathlib
 import tarfile
 import threading
 
+from bespokelabs.sandbox.capabilities import BackendCapabilities
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     SandboxConfigurationError,
@@ -32,12 +33,28 @@ class DockerClient:
     for every subsequent session created through this client.
     """
 
-    supports_dockerfile = True
-    # "none" is enforced through the derived allow_internet flag.
-    network_modes = frozenset({"public", "none"})
-    # containers.run kwargs that would override the policy.
-    network_option_keys = frozenset(
-        {"network_mode", "network", "network_disabled", "networking_config"}
+    capabilities = BackendCapabilities(
+        options=frozenset(
+            {
+                "cpu",
+                "memory_mb",
+                "timeout_secs",
+                "image",
+                "env_vars",
+                "allow_internet",
+                "backend_options",
+            }
+        ),
+        dockerfile=True,
+        # "none" is enforced through the derived allow_internet flag.
+        network_modes=frozenset({"public", "none"}),
+        # containers.run kwargs that would override the policy.
+        network_option_keys=frozenset(
+            {"network_mode", "network", "network_disabled", "networking_config"}
+        ),
+        expose_port=True,
+        snapshot=True,
+        resume=True,
     )
 
     def __init__(self) -> None:

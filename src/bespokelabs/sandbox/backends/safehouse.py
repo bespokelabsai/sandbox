@@ -15,6 +15,7 @@ from bespokelabs.sandbox.backends._prelude import (
     is_python_language,
     rewrite_redirects,
 )
+from bespokelabs.sandbox.capabilities import BackendCapabilities
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     FeatureNotSupportedError,
@@ -35,6 +36,17 @@ class SafehouseClient:
     Verifies the platform and CLI availability once at construction;
     create() only has to set up a per-session working directory.
     """
+
+    capabilities = BackendCapabilities(
+        options=frozenset(
+            {
+                "timeout_secs",
+                "env_vars",
+                "workdir",
+            }
+        ),
+        resume=True,
+    )
 
     def __init__(self) -> None:
         if platform.system() != "Darwin":

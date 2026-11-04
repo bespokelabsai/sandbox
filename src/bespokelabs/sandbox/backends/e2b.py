@@ -6,6 +6,7 @@ import os
 import pathlib
 import shlex
 
+from bespokelabs.sandbox.capabilities import BackendCapabilities
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     FeatureNotSupportedError,
@@ -23,6 +24,19 @@ from bespokelabs.sandbox.types import (
 
 class E2BClient:
     """Factory for E2B sandboxes."""
+
+    capabilities = BackendCapabilities(
+        options=frozenset(
+            {
+                "timeout_secs",
+                "env_vars",
+                "template",
+                "backend_options",
+            }
+        ),
+        expose_port=True,
+        resume=True,
+    )
 
     def __init__(self) -> None:
         try:

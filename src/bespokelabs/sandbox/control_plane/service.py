@@ -13,6 +13,7 @@ from typing import Any, Protocol
 
 from bespokelabs.sandbox import pricing
 from bespokelabs.sandbox.backends import BACKENDS
+from bespokelabs.sandbox.capabilities import capabilities_of
 from bespokelabs.sandbox.control_plane.errors import (
     AuthorizationError,
     ConflictError,
@@ -107,7 +108,7 @@ class ControlPlane:
         job_only = {
             name
             for name, cls in BACKENDS.items()
-            if not getattr(cls, "supports_sessions", True)
+            if not capabilities_of(cls).sessions
         }
         if allowed_backends is None:
             allowed_backends = [

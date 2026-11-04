@@ -15,6 +15,7 @@ from bespokelabs.sandbox.backends._prelude import (
     is_python_language,
     rewrite_redirects,
 )
+from bespokelabs.sandbox.capabilities import BackendCapabilities
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     FeatureNotSupportedError,
@@ -36,6 +37,16 @@ class RayClient:
     initialized on first create() (Ray itself keeps that global) and
     shared by every session created through this client.
     """
+
+    capabilities = BackendCapabilities(
+        options=frozenset(
+            {
+                "cpu",
+                "timeout_secs",
+                "env_vars",
+            }
+        ),
+    )
 
     def __init__(self) -> None:
         try:

@@ -66,7 +66,10 @@ class NetworkPolicy:
 class SandboxConfig:
     """Normalized configuration passed to every backend adapter.
 
-    Not all backends honour every field:
+    Not all backends honour every field.  Each backend client declares the
+    options it applies in ``capabilities.options``; ``Sandbox`` warns (or
+    with ``strict=True`` raises) when a caller sets one that is not there.
+    Per field:
       - cpu / memory_mb: Daytona, Tensorlake, Modal, Docker, RunPod
       - gpu: Modal (e.g. ``"L4"`` or ``"H100:2"``), RunPod (exact GPU
         type ID, optionally followed by a count, e.g.

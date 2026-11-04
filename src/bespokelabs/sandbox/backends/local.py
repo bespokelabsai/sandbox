@@ -14,6 +14,7 @@ from bespokelabs.sandbox.backends._prelude import (
     is_python_language,
     rewrite_redirects,
 )
+from bespokelabs.sandbox.capabilities import BackendCapabilities
 from bespokelabs.sandbox.exceptions import (
     FeatureNotSupportedError,
     SandboxCreationError,
@@ -29,6 +30,17 @@ from bespokelabs.sandbox.types import (
 
 class LocalClient:
     """Factory for local subprocess sandboxes. Stateless — nothing to connect to."""
+
+    capabilities = BackendCapabilities(
+        options=frozenset(
+            {
+                "timeout_secs",
+                "env_vars",
+                "workdir",
+            }
+        ),
+        resume=True,
+    )
 
     def create(self, config: SandboxConfig) -> LocalSession:
         try:
