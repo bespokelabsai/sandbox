@@ -436,7 +436,7 @@ def _check_config(config: SandboxConfig) -> None:
 
 def _check_env(env_vars: dict[str, str]) -> dict[str, str]:
     for key in env_vars:
-        if not _ENV_NAME_RE.match(key):
+        if not isinstance(key, str) or not _ENV_NAME_RE.fullmatch(key):
             raise SandboxConfigurationError(
                 f"Invalid environment variable name: {key!r}",
                 backend="boxd",
