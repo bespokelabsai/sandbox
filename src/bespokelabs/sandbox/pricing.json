@@ -82,6 +82,15 @@
       "free_tier": "EUR 30 of credits when a payment method is added",
       "pricing_url": "https://boxd.sh/pricing",
       "notes": "Billed per second: vCPU on the machine size while running, RAM on memory in use, disk on bytes written. Storage is $0.000096/GiB-hour."
+    },
+    "maritime": {
+      "vcpu_per_hour_usd": 0.0055,
+      "ram_gib_per_hour_usd": 0.00275,
+      "storage_gib_per_month_usd": 0.08,
+      "per_execution_usd": 0.0,
+      "free_tier": "7-day free trial",
+      "pricing_url": "https://maritime.sh/pricing",
+      "notes": "Billed per second while running, disk included. Paused sandboxes and snapshots are free up to 20 GB, then $0.08/GB-month."
     }
   }
 }

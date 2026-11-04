@@ -70,7 +70,7 @@ class Sandbox:
     """A live sandbox session with a unified interface across backends.
 
     Supported backends are Local, Safehouse, Docker, Ray, Daytona, Tensorlake,
-    Modal, RunPod, E2B, and boxd.
+    Modal, RunPod, E2B, boxd, and Maritime.
 
     Usage:
         with Sandbox("safehouse", timeout_secs=300) as sb:
@@ -156,13 +156,14 @@ class Sandbox:
         # project-scoped name (tensorlake_image), while RunPod uses its
         # SSH-ready default image and runs the preset setup commands there.
         # The ordinary preset OCI images do not run an SSH daemon. boxd
-        # machines boot boxd's own image, so presets run their setup commands
-        # there too. Everything else uses the OCI `image` field.
+        # machines boot boxd's own image, and Maritime sandboxes boot a
+        # Maritime template, so presets run their setup commands there too.
+        # Everything else uses the OCI `image` field.
         preset_image_for_backend = None
         if resolved_preset:
             if backend == "tensorlake":
                 preset_image_for_backend = resolved_preset.tensorlake_image
-            elif backend not in ("runpod", "boxd"):
+            elif backend not in ("runpod", "boxd", "maritime"):
                 preset_image_for_backend = resolved_preset.image
         if dockerfile_path is not None:
             # The Dockerfile replaces the preset image; setup commands run.
@@ -885,8 +886,9 @@ class SandboxClient:
     def list_sandboxes(self, labels: Mapping[str, str]) -> list[SandboxListing]:
         """List this backend's running sandboxes that carry all of *labels*.
 
-        Supported on ``daytona`` (resource labels) and ``modal`` (sandbox
-        tags); every other backend raises :class:`FeatureNotSupportedError`.
+        Supported on ``daytona`` (resource labels), ``modal`` (sandbox
+        tags) and ``maritime`` (sandbox metadata); every other backend
+        raises :class:`FeatureNotSupportedError`.
         *labels* must name at least one non-empty label: an unfiltered
         listing is refused, so a caller can never act on sandboxes it did
         not mark.  Provider failures raise; a partial list is never

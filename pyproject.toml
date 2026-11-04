@@ -11,7 +11,7 @@ dependencies = [
 authors = [
     { name = "Bespoke Labs" },
 ]
-keywords = ["sandbox", "cloud", "daytona", "modal", "runpod", "e2b", "tensorlake", "docker", "ray", "safehouse", "boxd", "gcp-batch", "bespokelabs"]
+keywords = ["sandbox", "cloud", "daytona", "modal", "runpod", "e2b", "tensorlake", "docker", "ray", "safehouse", "boxd", "maritime", "gcp-batch", "bespokelabs"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
