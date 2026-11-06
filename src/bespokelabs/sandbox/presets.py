@@ -85,7 +85,7 @@ PRESET_IMAGE_TAG = "v2"
 # needs, so Claude Code comes from its native installer.  The run user has
 # passwordless sudo, which global npm installs need.
 _MARITIME_CLAUDE_INSTALL = (
-    "curl -fsSL https://claude.ai/install.sh | bash && "
+    "set -o pipefail && curl -fsSL https://claude.ai/install.sh | bash && "
     'sudo ln -sf "$HOME/.local/bin/claude" /usr/local/bin/claude'
 )
 
