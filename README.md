@@ -7,7 +7,7 @@
   </a>
 </p>
 
-<h1 align="center">OpenRouter for Sandboxes</h1>
+<h1 align="center">One Library for all Sandbox Providers</h1>
 <h3 align="center" style="font-size: 20px; margin-bottom: 4px">One API. Many sandbox providers.</h3>
 <br/>
 
@@ -26,7 +26,7 @@ operations dashboard.
 
 ## Why?
 
-- **Common interface** — Use the same execution and file APIs across ten backends, with provider-specific configuration where needed.
+- **Common interface** — Use the same execution and file APIs across many backends, with provider-specific configuration where needed.
 - **Easily move between providers** — If one provider has an outage or capacity issue, change one string and keep running.
 - **Cost tracking** — Track Claude Code token usage, estimated sandbox compute cost, and compare backend pricing.
 - **Optional hosted access** — Operate multiple providers behind organization API keys, with lifecycle costs, policies, audit history, and a dashboard.
