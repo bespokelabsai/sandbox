@@ -70,6 +70,10 @@ def _can_use_boxd() -> bool:
         return False
 
 
+def _can_use_maritime() -> bool:
+    return bool(os.environ.get("MARITIME_API_KEY"))
+
+
 def _can_use_modal() -> bool:
     try:
         import modal  # noqa: F401
@@ -239,6 +243,11 @@ class E2BRegressionTests(_RegressionMixin, unittest.TestCase):
 @unittest.skipUnless(_can_use_boxd(), "boxd SDK or BOXD_API_KEY not available")
 class BoxdRegressionTests(_RegressionMixin, unittest.TestCase):
     backend_name = "boxd"
+
+
+@unittest.skipUnless(_can_use_maritime(), "MARITIME_API_KEY not available")
+class MaritimeRegressionTests(_RegressionMixin, unittest.TestCase):
+    backend_name = "maritime"
 
 
 @unittest.skipUnless(_can_use_modal(), "Modal SDK not available")
