@@ -9,9 +9,11 @@ import os
 import pathlib
 import shlex
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 
+from bespokelabs.sandbox import _metrics
 from bespokelabs.sandbox.exceptions import (
     BackendNotInstalledError,
     ErrorOutcome,
@@ -44,6 +46,36 @@ _CREATE_TOKEN_LABEL = "bespokelabs.sandbox/create-token"
 
 # backend_options key that overrides the deadline passed to Daytona.create().
 _CREATE_TIMEOUT_OPTION = "create_timeout"
+# backend_options key setting the in-flight exec keepalive interval in seconds
+# (0 disables it); see _Keepalive.  The env var is the fallback, which also
+# covers resume().
+_KEEPALIVE_OPTION = "keepalive_interval_secs"
+_KEEPALIVE_ENV = "BESPOKELABS_SANDBOX_DAYTONA_KEEPALIVE_SECS"
+_DEFAULT_KEEPALIVE_SECS = 300.0
+# Bounds on one refresh_activity call, and on how many failures in a row the
+# keepalive tolerates before it gives up for the rest of that exec.
+_KEEPALIVE_REQUEST_TIMEOUT_SECS = 30.0
+_KEEPALIVE_MAX_CONSECUTIVE_FAILURES = 3
+# backend_options key with extra metric tags (e.g. {"caller": "my-job"}).
+_METRIC_TAGS_OPTION = "metric_tags"
+# backend_options key mapping a metric tag name to the sandbox label whose
+# value becomes that tag (e.g. {"pipeline": "my-pipeline-label"}).  The env
+# var is the fallback, as "tag=label,tag=label".  There is no default mapping.
+_METRIC_TAG_LABELS_OPTION = "metric_tag_labels"
+_METRIC_TAG_LABELS_ENV = "BESPOKELABS_SANDBOX_METRIC_TAG_LABELS"
+# Options this backend consumes itself; none of them reach the params object.
+_LOCAL_OPTIONS = frozenset(
+    {
+        _CREATE_TIMEOUT_OPTION,
+        _KEEPALIVE_OPTION,
+        _METRIC_TAGS_OPTION,
+        _METRIC_TAG_LABELS_OPTION,
+    }
+)
+
+IDLE_GAP_METRIC = "bespokelabs.sandbox.idle_gap_seconds"
+MAX_IDLE_GAP_METRIC = "bespokelabs.sandbox.max_idle_gap_seconds"
+_CALLER_ENV = "BESPOKELABS_SANDBOX_CALLER"
 
 # Lifecycle defaults for a sandbox whose caller set none (see
 # _apply_lifecycle_defaults).
@@ -55,9 +87,11 @@ _CREATE_TIMEOUT_OPTION = "create_timeout"
 # run past an hour, and so make no Toolbox call for well over an hour while
 # the work is very much alive, so
 # the window is 4 hours, not 1.  A driver silent for that long is gone; the
-# idle stop is a backstop for a killed driver, not a tight cost control.  A
-# blocking call that may run longer still should pass an explicit
-# backend_options auto_stop_interval, or run in the background and be polled.
+# idle stop is a backstop for a killed driver, not a tight cost control.  The
+# in-flight keepalive (_Keepalive) now refreshes activity under a blocking
+# exec; with it turned off, a call that may run longer still should pass an
+# explicit backend_options auto_stop_interval.  The 4 hours is a placeholder
+# until the max_idle_gap_seconds metric gives an evidence-based value.
 _DEFAULT_AUTO_STOP_MINUTES = 4 * 60
 # Delete after stop: this backend never stops a sandbox itself and resume()
 # does not restart one, so a stopped sandbox is already unusable from here.
@@ -221,11 +255,19 @@ class DaytonaClient:
         except Exception as exc:
             raise _classify_daytona_error(exc, op="connect") from exc
         return DaytonaSession(
-            client=client, sandbox=sandbox, workdir=data.get("workdir")
+            client=client,
+            sandbox=sandbox,
+            workdir=data.get("workdir"),
+            keepalive_secs=data.get(_KEEPALIVE_OPTION),
+            metric_tags=data.get(_METRIC_TAGS_OPTION),
+            metric_tag_labels=data.get(_METRIC_TAG_LABELS_OPTION),
         )
 
     def create(self, config: SandboxConfig) -> DaytonaSession:
         self._ensure_client()
+        keepalive_secs = _keepalive_option(config)
+        metric_tags = _metric_tags_option(config)
+        metric_tag_labels = _metric_tag_labels_option(config)
 
         # Unique to this create call.  If the call fails after Daytona has
         # already built the sandbox, this token is how we find the orphan.
@@ -253,7 +295,12 @@ class DaytonaClient:
             raise
 
         return DaytonaSession(
-            client=self._client, sandbox=sandbox, workdir=config.workdir
+            client=self._client,
+            sandbox=sandbox,
+            workdir=config.workdir,
+            keepalive_secs=keepalive_secs,
+            metric_tags=metric_tags,
+            metric_tag_labels=metric_tag_labels,
         )
 
     def _reap_orphan(self, create_token: str) -> _CleanupReport:
@@ -341,6 +388,206 @@ def _create_kwargs(config: SandboxConfig) -> dict:
             op="create",
         )
     return {"timeout": timeout}
+
+
+def _keepalive_option(config: SandboxConfig) -> float | None:
+    """Return the keepalive interval from backend_options, or ``None``."""
+    raw = config.backend_options.get(_KEEPALIVE_OPTION)
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise SandboxConfigurationError(
+            f"backend_options['{_KEEPALIVE_OPTION}'] must be a number of "
+            f"seconds (0 disables), got {raw!r}",
+            backend="daytona",
+            op="create",
+        ) from exc
+    if value < 0 or not math.isfinite(value):
+        raise SandboxConfigurationError(
+            f"backend_options['{_KEEPALIVE_OPTION}'] must be >= 0, got {raw!r}",
+            backend="daytona",
+            op="create",
+        )
+    return value
+
+
+def _metric_tags_option(config: SandboxConfig) -> dict[str, str] | None:
+    raw = config.backend_options.get(_METRIC_TAGS_OPTION)
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise SandboxConfigurationError(
+            f"backend_options['{_METRIC_TAGS_OPTION}'] must be a dict of "
+            f"tag name to value, got {raw!r}",
+            backend="daytona",
+            op="create",
+        )
+    return {str(k): str(v) for k, v in raw.items()}
+
+
+def _metric_tag_labels_option(
+    config: SandboxConfig,
+) -> dict[str, str] | None:
+    """Return the tag-to-label mapping from backend_options, or ``None``."""
+    raw = config.backend_options.get(_METRIC_TAG_LABELS_OPTION)
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or not all(
+        isinstance(k, str) and k and isinstance(v, str) and v
+        for k, v in raw.items()
+    ):
+        raise SandboxConfigurationError(
+            f"backend_options['{_METRIC_TAG_LABELS_OPTION}'] must be a dict "
+            f"of metric tag name to sandbox label key, got {raw!r}",
+            backend="daytona",
+            op="create",
+        )
+    return dict(raw)
+
+
+def _env_metric_tag_labels() -> dict[str, str] | None:
+    """Parse ``tag=label,tag=label`` from the env var, or return ``None``.
+
+    A malformed entry is logged and skipped; it never fails the caller.
+    """
+    raw = os.environ.get(_METRIC_TAG_LABELS_ENV)
+    if not raw:
+        return None
+    mapping: dict[str, str] = {}
+    for raw_entry in raw.split(","):
+        entry = raw_entry.strip()
+        if not entry:
+            continue
+        tag, sep, label = (part.strip() for part in entry.partition("="))
+        if not sep or not tag or not label:
+            logger.warning(
+                "Ignoring %r in %s: expected tag=label",
+                entry,
+                _METRIC_TAG_LABELS_ENV,
+            )
+            continue
+        mapping[tag] = label
+    return mapping or None
+
+
+def _env_keepalive_secs() -> float | None:
+    """Return a valid interval from the env var, or ``None``."""
+    raw = os.environ.get(_KEEPALIVE_ENV)
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning(
+            "Ignoring %s=%r: not a number of seconds", _KEEPALIVE_ENV, raw
+        )
+        return None
+    if value >= 0 and math.isfinite(value):
+        return value
+    logger.warning("Ignoring %s=%r: must be >= 0", _KEEPALIVE_ENV, raw)
+    return None
+
+
+def _resolve_keepalive_secs(explicit: float | None) -> float:
+    """Return the explicit interval, else the env var, else the default."""
+    if explicit is not None:
+        return float(explicit)
+    from_env = _env_keepalive_secs()
+    return _DEFAULT_KEEPALIVE_SECS if from_env is None else from_env
+
+
+def _sandbox_class(sandbox: object) -> str:
+    """Return a coarse size class such as ``cpu2-mem4g``, or ``unknown``."""
+
+    def num(name: str) -> float | None:
+        value = getattr(sandbox, name, None)
+        return float(value) if isinstance(value, (int, float)) else None
+
+    cpu, memory, gpu = num("cpu"), num("memory"), num("gpu")
+    if cpu is None and memory is None:
+        return "unknown"
+    parts = []
+    if cpu is not None:
+        parts.append(f"cpu{cpu:g}")
+    if memory is not None:
+        parts.append(f"mem{memory:g}g")
+    if gpu:
+        parts.append(f"gpu{gpu:g}")
+    return "-".join(parts)
+
+
+class _Keepalive:
+    """Call ``refresh_activity()`` on a timer while one blocking call runs.
+
+    Daytona resets its idle auto-stop clock on Toolbox calls but does not
+    document whether a call still in flight counts, so a long blocking exec
+    could be idle-stopped mid-run.  ``POST /sandbox/{id}/last-activity``
+    (``Sandbox.refresh_activity``) resets the clock explicitly.
+
+    Best effort and bounded: each refresh has a request timeout, failures are
+    logged and never reach the exec, the thread gives up after a few failures
+    in a row, and it is a daemon thread that stop() joins only briefly.
+    """
+
+    def __init__(
+        self, sandbox: object, interval: float, on_refresh=None
+    ) -> None:
+        self._sandbox = sandbox
+        self._interval = interval
+        self._on_refresh = on_refresh
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self.refreshes = 0
+        self.failures = 0
+
+    def __enter__(self) -> _Keepalive:
+        refresh = getattr(self._sandbox, "refresh_activity", None)
+        if self._interval > 0 and callable(refresh):
+            self._thread = threading.Thread(
+                target=self._run,
+                args=(refresh,),
+                name="daytona-keepalive",
+                daemon=True,
+            )
+            self._thread.start()
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            # A refresh in flight finishes on its own (it is bounded by
+            # _KEEPALIVE_REQUEST_TIMEOUT_SECS); never hold up the exec result.
+            self._thread.join(timeout=1.0)
+
+    def _run(self, refresh) -> None:
+        consecutive = 0
+        while not self._stop.wait(self._interval):
+            try:
+                refresh(request_timeout=_KEEPALIVE_REQUEST_TIMEOUT_SECS)
+            except Exception:  # noqa: BLE001 - never fail the exec
+                self.failures += 1
+                consecutive += 1
+                logger.warning(
+                    "Daytona keepalive refresh_activity failed for sandbox %s "
+                    "(%d in a row)",
+                    getattr(self._sandbox, "id", "<unknown>"),
+                    consecutive,
+                    exc_info=True,
+                )
+                if consecutive >= _KEEPALIVE_MAX_CONSECUTIVE_FAILURES:
+                    logger.warning(
+                        "Daytona keepalive giving up for this call after %d "
+                        "failures in a row",
+                        consecutive,
+                    )
+                    return
+            else:
+                consecutive = 0
+                self.refreshes += 1
+                if self._on_refresh is not None:
+                    self._on_refresh()
 
 
 def _check_dockerfile_context(config: SandboxConfig) -> None:
@@ -443,12 +690,13 @@ def _build_params(config: SandboxConfig, *, create_token: str) -> object:
     )
     from daytona.common.sandbox import Resources  # type: ignore[import-untyped]
 
-    # _CREATE_TIMEOUT_OPTION targets Daytona.create(), not the params object;
-    # leaving it in would be silently swallowed (params ignore extra fields).
+    # _LOCAL_OPTIONS are consumed by this backend (create_timeout targets
+    # Daytona.create() itself), not the params object; leaving them in would
+    # be silently swallowed (params ignore extra fields).
     options = {
         k: v
         for k, v in config.backend_options.items()
-        if k != _CREATE_TIMEOUT_OPTION
+        if k not in _LOCAL_OPTIONS
     }
 
     common: dict = {}
@@ -537,11 +785,103 @@ class DaytonaSession:
     """
 
     def __init__(
-        self, *, client: object, sandbox: object, workdir: str | None = None
+        self,
+        *,
+        client: object,
+        sandbox: object,
+        workdir: str | None = None,
+        keepalive_secs: float | None = None,
+        metric_tags: dict[str, str] | None = None,
+        metric_tag_labels: dict[str, str] | None = None,
     ) -> None:
         self._client = client
         self._sandbox: object = sandbox
         self._workdir = workdir
+        # What session_state() persists: the explicit option, else an interval
+        # taken from the env var, so a resume in a process with a different
+        # (or no) env value keeps this session's interval.  Only the built-in
+        # default is left out.
+        self._keepalive_option = (
+            float(keepalive_secs)
+            if keepalive_secs is not None
+            else _env_keepalive_secs()
+        )
+        self._keepalive_secs = _resolve_keepalive_secs(self._keepalive_option)
+        self._metric_tags_option = metric_tags
+        # Like the keepalive: the explicit mapping, else the env var's, is
+        # what session_state() persists, so a resume reads the same labels.
+        self._metric_tag_labels = (
+            dict(metric_tag_labels)
+            if metric_tag_labels is not None
+            else _env_metric_tag_labels()
+        )
+        self._tags = self._build_tags(
+            sandbox, metric_tags, self._metric_tag_labels
+        )
+        # Idle-gap tracking.  The clock starts when this session object is
+        # made (just after create, or at resume) and moves on every activity
+        # mark: a toolbox call starting or ending, and a successful keepalive.
+        self._activity_lock = threading.Lock()
+        self._last_activity = time.monotonic()
+        self._max_gap = 0.0
+        self._max_gap_emitted = False
+
+    @staticmethod
+    def _build_tags(
+        sandbox: object,
+        metric_tags: dict[str, str] | None,
+        metric_tag_labels: dict[str, str] | None,
+    ) -> dict[str, str]:
+        tags = {"backend": "daytona", "sandbox_class": _sandbox_class(sandbox)}
+        labels = getattr(sandbox, "labels", None)
+        if isinstance(labels, dict):
+            for tag, label in (metric_tag_labels or {}).items():
+                if labels.get(label):
+                    tags[tag] = str(labels[label])
+        if "caller" not in tags and os.environ.get(_CALLER_ENV):
+            tags["caller"] = os.environ[_CALLER_ENV]
+        tags.update(metric_tags or {})
+        return tags
+
+    def _mark_activity(self) -> None:
+        with self._activity_lock:
+            self._last_activity = time.monotonic()
+
+    def _record_gap(self, *, now: float | None = None) -> float:
+        """Fold the gap since the last activity mark into the max; reset."""
+        with self._activity_lock:
+            # Read the clock under the lock, so a concurrent _mark_activity can
+            # never store a newer stamp that this call then overwrites with a
+            # stale one (which would move _last_activity backwards).
+            now = time.monotonic() if now is None else now
+            gap = max(0.0, now - self._last_activity)
+            self._last_activity = now
+            self._max_gap = max(self._max_gap, gap)
+        return gap
+
+    def _toolbox(self, op: str, fn, *, keepalive: bool = False):
+        """Run one Toolbox API call with idle-gap tracking (and keepalive)."""
+        # The gap is measured before the call but emitted after it, so a slow
+        # metrics sink can never delay the call (and let the sandbox idle-stop
+        # before it reaches Daytona).
+        gap = self._record_gap()
+        try:
+            if keepalive:
+                with _Keepalive(
+                    self._sandbox,
+                    self._keepalive_secs,
+                    on_refresh=self._mark_activity,
+                ):
+                    return fn()
+            return fn()
+        finally:
+            self._mark_activity()
+            _metrics.emit(
+                IDLE_GAP_METRIC,
+                gap,
+                {**self._tags, "op": op},
+                log_level=logging.DEBUG,
+            )
 
     @property
     def provider_resource_id(self) -> str | None:
@@ -554,7 +894,11 @@ class DaytonaSession:
     ) -> SandboxResult:
         del language  # Unused; the Daytona code endpoint executes Python.
         try:
-            response = self._sandbox.process.code_run(code)
+            response = self._toolbox(
+                "execute_code",
+                lambda: self._sandbox.process.code_run(code),
+                keepalive=True,
+            )
             return SandboxResult(
                 stdout=getattr(response, "result", "") or "",
                 stderr="",
@@ -572,7 +916,11 @@ class DaytonaSession:
                 if not args
                 else f"{command} {' '.join(shlex.quote(a) for a in args)}"
             )
-            response = self._sandbox.process.exec(full_cmd, cwd=self._workdir)
+            response = self._toolbox(
+                "execute_command",
+                lambda: self._sandbox.process.exec(full_cmd, cwd=self._workdir),
+                keepalive=True,
+            )
             return SandboxResult(
                 stdout=getattr(response, "result", "") or "",
                 stderr="",
@@ -583,7 +931,9 @@ class DaytonaSession:
 
     def list_files(self, path: str = "/") -> list[FileInfo]:
         try:
-            entries = self._sandbox.fs.list_files(path)
+            entries = self._toolbox(
+                "list_files", lambda: self._sandbox.fs.list_files(path)
+            )
             return [
                 FileInfo(
                     path=getattr(e, "name", str(e)),
@@ -599,7 +949,9 @@ class DaytonaSession:
 
     def read_file(self, path: str) -> bytes:
         try:
-            content = self._sandbox.fs.download_file(path)
+            content = self._toolbox(
+                "read_file", lambda: self._sandbox.fs.download_file(path)
+            )
             return content if isinstance(content, bytes) else content.encode()
         except Exception as exc:
             raise SandboxExecutionError(
@@ -609,7 +961,9 @@ class DaytonaSession:
     def write_file(self, path: str, content: bytes | str) -> None:
         try:
             data = content if isinstance(content, bytes) else content.encode()
-            self._sandbox.fs.upload_file(data, path)
+            self._toolbox(
+                "write_file", lambda: self._sandbox.fs.upload_file(data, path)
+            )
         except Exception as exc:
             raise SandboxExecutionError(
                 f"Daytona write_file failed: {exc}"
@@ -618,7 +972,10 @@ class DaytonaSession:
     def upload_file(self, local_path: str, remote_path: str) -> None:
         try:
             data = pathlib.Path(local_path).read_bytes()
-            self._sandbox.fs.upload_file(data, remote_path)
+            self._toolbox(
+                "upload_file",
+                lambda: self._sandbox.fs.upload_file(data, remote_path),
+            )
         except Exception as exc:
             raise SandboxExecutionError(
                 f"Daytona upload_file failed: {exc}"
@@ -626,7 +983,10 @@ class DaytonaSession:
 
     def download_file(self, remote_path: str, local_path: str) -> None:
         try:
-            data = self._sandbox.fs.download_file(remote_path)
+            data = self._toolbox(
+                "download_file",
+                lambda: self._sandbox.fs.download_file(remote_path),
+            )
             content = data if isinstance(data, bytes) else data.encode()
             pathlib.Path(local_path).write_bytes(content)
         except Exception as exc:
@@ -671,12 +1031,31 @@ class DaytonaSession:
             # Carried across resume so the working directory isn't dropped there
             # either.
             state["workdir"] = self._workdir
+        if self._keepalive_option is not None:
+            state[_KEEPALIVE_OPTION] = self._keepalive_option
+        if self._metric_tags_option:
+            state[_METRIC_TAGS_OPTION] = dict(self._metric_tags_option)
+        # `is not None`, so an explicit empty mapping is carried too and a
+        # resume does not fall back to the environment's mapping.
+        if self._metric_tag_labels is not None:
+            state[_METRIC_TAG_LABELS_OPTION] = dict(self._metric_tag_labels)
         return state
 
     def destroy(self) -> None:
+        emit_max = self._sandbox is not None and not self._max_gap_emitted
+        if emit_max:
+            # The time from the last activity to destroy() is idle time the
+            # sandbox really spent, so it counts toward the max.  Emitted once,
+            # even if a failed destroy() is retried.
+            self._max_gap_emitted = True
+            self._record_gap()
         try:
             if self._sandbox and self._client:
                 self._client.delete(self._sandbox)
         except Exception as exc:
             raise _classify_daytona_error(exc, op="destroy") from exc
+        finally:
+            # After the delete, so a slow metrics sink cannot hold up cleanup.
+            if emit_max:
+                _metrics.emit(MAX_IDLE_GAP_METRIC, self._max_gap, self._tags)
         self._sandbox = None
